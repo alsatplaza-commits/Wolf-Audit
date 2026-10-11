@@ -11,3 +11,11 @@ result.json
 .env
 .env.*
 !.env.example
+
+# Locally generated security evidence. Never publish confidential scan results.
+*.sarif
+*.cdx.json
+audit*.json
+gate*.json
+delta*.json
+osv-report*.json
