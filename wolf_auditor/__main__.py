@@ -11,6 +11,7 @@ from .engine import scan
 from .reporting import to_sarif, to_sbom
 from .osv import enrich_with_osv
 from .policy import evaluate
+from .delta import compare_reports
 
 
 def main() -> int:
@@ -23,14 +24,24 @@ def main() -> int:
                         help="OPT IN: disclose package names and exact versions to OSV")
     parser.add_argument("--policy", type=Path, help="explicit JSON release policy")
     parser.add_argument("--gate-output", type=Path, help="optional JSON policy verdict; requires --policy")
+    parser.add_argument("--baseline", type=Path, help="previous evidence JSON to compare against")
+    parser.add_argument("--delta-output", type=Path, help="redacted delta JSON; requires --baseline")
     args = parser.parse_args()
     try:
         if args.gate_output and not args.policy:
             raise ValueError("--gate-output requires --policy")
+        if args.delta_output and not args.baseline:
+            raise ValueError("--delta-output requires --baseline")
         report = scan(args.target)
         if args.osv_online:
             print("OSV disclosure opted in: package names and exact versions sent to OSV", file=sys.stderr)
             report = enrich_with_osv(report)
+        delta = None
+        if args.baseline:
+            if args.baseline.stat().st_size > 10_000_000:
+                raise ValueError("baseline report exceeds 10 MB")
+            previous = json.loads(args.baseline.read_text(encoding="utf-8"))
+            delta = compare_reports(previous, report)
         verdict = None
         if args.policy:
             if args.policy.stat().st_size > 65_536:
@@ -44,6 +55,8 @@ def main() -> int:
             (args.sbom, json.dumps(to_sbom(report), ensure_ascii=False, indent=2) + "\n"),
             (args.gate_output, json.dumps(verdict, ensure_ascii=False, indent=2) + "\n"
              if verdict is not None else ""),
+            (args.delta_output, json.dumps(delta, ensure_ascii=False, indent=2) + "\n"
+             if delta is not None else ""),
         ]
         for destination, data in outputs:
             if destination is not None:
