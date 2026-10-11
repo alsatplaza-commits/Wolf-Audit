@@ -25,7 +25,7 @@ jobs:
         shell: bash
         run: |
           code=0
-          python -m wolf_auditor . --output wolf-auditor-self-report.json || code=$?
+          python -m wolf_auditor . --output wolf-auditor-self-report.json --sarif wolf-auditor.sarif --sbom wolf-auditor.cdx.json || code=$?
           if [ "$code" -eq 2 ]; then
             echo "INCOMPLETE scan; fail closed"
             exit 2
@@ -36,5 +36,8 @@ jobs:
         if: always()
         with:
           name: baseline-evidence-${{ matrix.os }}
-          path: wolf-auditor-self-report.json
+          path: |
+            wolf-auditor-self-report.json
+            wolf-auditor.sarif
+            wolf-auditor.cdx.json
           if-no-files-found: ignore
