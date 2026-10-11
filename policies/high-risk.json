@@ -1,0 +1,1 @@
+{"schema":"wolf-auditor.policy.v1","block_at_or_above":"high","require_osv":false,"block_on_advisories":true,"max_findings":null}
