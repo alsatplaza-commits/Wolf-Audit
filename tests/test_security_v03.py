@@ -1,0 +1,177 @@
+"""No-network contract tests for OSV advisory matching, policy gates and IaC."""
+import copy
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from wolf_auditor.engine import scan
+from wolf_auditor.osv import enrich_with_osv
+from wolf_auditor.policy import evaluate, validate_policy
+from wolf_auditor.reporting import to_sarif
+
+POLICY = {"schema": "wolf-auditor.policy.v1", "block_at_or_above": "high", "require_osv": False}
+
+
+class SecurityV03Tests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def make(self, name, content):
+        p = self.root / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf8")
+
+    def with_deps(self):
+        self.make("requirements.txt", "requests==2.1.0\n")
+        return scan(self.root)
+
+    def test_osv_off_by_default(self):
+        self.with_deps()
+        with patch("wolf_auditor.osv._http_query", side_effect=AssertionError("unexpected network")):
+            report = scan(self.root)
+        self.assertNotIn("external_checks", report)
+
+    def test_osv_real_advisory_shape_with_mock_no_network(self):
+        report = self.with_deps()
+        calls = []
+        def stub(queries):
+            calls.extend(queries)
+            return {"results": [{"vulns": [{"id": "GHSA-aaaa-bbbb-cccc"}]}]}
+        enriched = enrich_with_osv(report, fetcher=stub)
+        self.assertEqual(enriched["external_checks"]["osv"]["state"], "COMPLETE")
+        self.assertEqual(calls[0]["package"], {"name": "requests", "ecosystem": "PyPI"})
+        self.assertEqual(enriched["findings"][0]["advisory_id"], "GHSA-aaaa-bbbb-cccc")
+        self.assertFalse(enriched["findings"][0]["verified_exploit"])
+        self.assertNotEqual(enriched["report_sha256"], report["report_sha256"])
+        self.assertNotIn("external_checks", report)
+
+    def test_osv_clean_response_is_not_security_certification(self):
+        enriched = enrich_with_osv(self.with_deps(), fetcher=lambda qs: {"results": [{"vulns": []} for _ in qs]})
+        self.assertEqual(enriched["status"], "NO_HEURISTIC_FINDINGS")
+        self.assertIn("not an exploit proof", enriched["external_checks"]["osv"]["disclaimer"])
+
+    def test_osv_network_failure_incomplete_not_pass(self):
+        def fail(queries):
+            raise OSError("connection dropped")
+        report = enrich_with_osv(self.with_deps(), fetcher=fail)
+        self.assertEqual(report["status"], "INCOMPLETE")
+        self.assertEqual(report["external_checks"]["osv"]["state"], "INCOMPLETE")
+        self.assertEqual(evaluate(report, POLICY)["status"], "BLOCK")
+
+    def test_osv_malformed_response_incomplete(self):
+        report = enrich_with_osv(self.with_deps(), fetcher=lambda qs: {"results": []})
+        self.assertEqual(report["status"], "INCOMPLETE")
+
+    def test_osv_bad_advisory_id_rejected(self):
+        report = enrich_with_osv(self.with_deps(),
+                                 fetcher=lambda qs: {"results": [{"vulns": [{"id": "../secret"}]}]})
+        self.assertEqual(report["status"], "INCOMPLETE")
+        self.assertEqual(report["findings"], [])
+
+    def test_osv_unpinned_dependency_cannot_be_looked_up(self):
+        self.make("requirements.txt", "requests>=2.0\n")
+        report = enrich_with_osv(scan(self.root), fetcher=lambda qs: {"results": []})
+        self.assertEqual(report["status"], "INCOMPLETE")
+        self.assertEqual(report["external_checks"]["osv"]["state"], "INCOMPLETE")
+
+    def test_osv_reproducible_for_fixed_fake_response(self):
+        src = self.with_deps()
+        stub = lambda qs: {"results": [{"vulns": [{"id": "GHSA-1234-5678-9abc"}]} for _ in qs]}
+        self.assertEqual(enrich_with_osv(src, fetcher=stub), enrich_with_osv(src, fetcher=stub))
+
+    def test_osv_sorted_deduplicated_queries_for_lockfiles(self):
+        self.make("requirements.txt", "requests==2.1.0\n")
+        self.make("requirements-dev.txt", "requests==2.1.0\n")
+        source = scan(self.root)
+        batches = []
+        def stub(qs):
+            batches.append(qs)
+            return {"results": [{"vulns": [{"id": "GHSA-aaaa-bbbb-cccc"}]} for _ in qs]}
+        report = enrich_with_osv(source, fetcher=stub)
+        self.assertEqual(sum(len(q) for q in batches), 1)
+        self.assertEqual(len(report["findings"]), 2)
+
+    def test_policy_blocks_high(self):
+        self.make("danger.py", 'eval("1+1")\n')
+        verdict = evaluate(scan(self.root), POLICY)
+        self.assertEqual(verdict["status"], "BLOCK")
+        self.assertIn("SEVERITY_THRESHOLD_EXCEEDED", verdict["reasons"])
+
+    def test_policy_allows_review_but_not_claims_security(self):
+        self.make("x.rs", "unsafe { do_something(); }\n")
+        verdict = evaluate(scan(self.root), POLICY)
+        self.assertEqual(verdict["status"], "PASS")
+        self.assertIn("NOT independent", verdict["disclaimer"])
+
+    def test_policy_blocks_incomplete_even_for_review_threshold(self):
+        self.make("broken.py", "def x(:\n")
+        verdict = evaluate(scan(self.root), {**POLICY, "block_at_or_above": "review"})
+        self.assertEqual(verdict["status"], "BLOCK")
+        self.assertIn("INCOMPLETE_COVERAGE", verdict["reasons"])
+
+    def test_policy_require_osv_without_check_blocks(self):
+        report = self.with_deps()
+        verdict = evaluate(report, {**POLICY, "require_osv": True})
+        self.assertIn("OSV_EVIDENCE_NOT_COMPLETE", verdict["reasons"])
+
+    def test_policy_require_osv_matched_check(self):
+        report = enrich_with_osv(self.with_deps(), fetcher=lambda qs: {"results": [{"vulns": []} for _ in qs]})
+        verdict = evaluate(report, {**POLICY, "require_osv": True})
+        self.assertEqual(verdict["status"], "PASS")
+
+    def test_policy_typo_fails_configuration(self):
+        with self.assertRaises(ValueError):
+            validate_policy({**POLICY, "block_at_or_abov": "review"})
+
+    def test_policy_boolean_max_findings_rejected(self):
+        with self.assertRaises(ValueError):
+            validate_policy({**POLICY, "max_findings": True})
+
+    def test_policy_count_limit(self):
+        self.make("x.rs", "unsafe { do(); }\n")
+        verdict = evaluate(scan(self.root), {**POLICY, "max_findings": 0})
+        self.assertEqual(verdict["status"], "BLOCK")
+        self.assertIn("FINDING_COUNT_EXCEEDED", verdict["reasons"])
+
+    def test_terraform_public_acl_and_ingress(self):
+        self.make("main.tf", 'acl = "public-read"\ncidr_blocks = ["0.0.0.0/0"]\n')
+        self.assertEqual({f["rule"] for f in scan(self.root)["findings"]},
+                         {"IAC_PUBLIC_OBJECT_ACL", "IAC_OPEN_IPV4_INGRESS_REVIEW"})
+
+    def test_kubernetes_privilege_escalation(self):
+        self.make("k8s/deployment.yaml", "privileged: true\nallowPrivilegeEscalation: true\nhostNetwork: true\n")
+        self.assertEqual({f["rule"] for f in scan(self.root)["findings"]},
+                         {"K8S_PRIVILEGED_CONTAINER", "K8S_PRIVILEGE_ESCALATION", "K8S_HOST_NETWORK"})
+
+    def test_kubernetes_detection_not_applied_to_github_workflows(self):
+        self.make(".github/workflows/check.yaml", "privileged: true\n")
+        self.assertNotIn("K8S_PRIVILEGED_CONTAINER", [f["rule"] for f in scan(self.root)["findings"]])
+
+    def test_private_key_redaction(self):
+        secret = "-----BEGIN OPENSSH PRIVATE KEY-----"
+        self.make(".env", secret + "\n")
+        report = scan(self.root)
+        self.assertIn("PRIVATE_KEY_MATERIAL", [f["rule"] for f in report["findings"]])
+        self.assertNotIn(secret, json.dumps(report))
+        self.assertNotIn(secret, json.dumps(to_sarif(report)))
+
+    def test_fake_github_token_not_exposed(self):
+        secret = "ghp_" + ("A" * 36)
+        self.make(".env.test", "TOKEN=" + secret + "\n")
+        report = scan(self.root)
+        self.assertIn("GITHUB_TOKEN_LIKE_STRING", [f["rule"] for f in report["findings"]])
+        self.assertNotIn(secret, json.dumps(report))
+
+    def test_ignored_generated_paths_have_explicit_inventory(self):
+        self.make("node_modules/vendor/evil.py", 'eval("danger")\n')
+        report = scan(self.root)
+        self.assertEqual(report["status"], "NO_HEURISTIC_FINDINGS")
+        self.assertEqual(report["excluded_paths"][0]["path"], "node_modules")
+
+
+if __name__ == "__main__":
+    unittest.main()
