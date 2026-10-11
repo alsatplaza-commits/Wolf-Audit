@@ -13,17 +13,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Download signed Android APK from private CI artifact
         env:
-          DOWNLOAD_ZIP: "https://sdmntpritalynorth.oaiusercontent.com/files/00000000-324c-8246-820a-07844205ef00/raw?se=2026-10-11T13%3A28%3A33Z&sp=r&sv=2026-02-06&sr=b&scid=b6347882-343f-58b4-bdf5-543a041d888b&skoid=82a3371f-2f6c-4f81-8a78-2701b362559b&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-10-11T01%3A51%3A56Z&ske=2026-10-12T01%3A51%3A56Z&sks=b&skv=2026-02-06&sig=NEK4EUgo0%2BkTFhANE8wDAInCrkaENG57HC70gw/7tHc%3D"
+          DOWNLOAD_ZIP: "https://sdmntpritalynorth.oaiusercontent.com/files/00000000-2fec-8246-9a34-385083cafe20/raw?se=2026-10-11T14%3A06%3A56Z&sp=r&sv=2026-02-06&sr=b&scid=230c5763-4050-5174-a344-273e3d365c4a&skoid=82a3371f-2f6c-4f81-8a78-2701b362559b&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-10-11T04%3A43%3A08Z&ske=2026-10-12T04%3A43%3A08Z&sks=b&skv=2026-02-06&sig=XZL2G3XFjedCBnHXqBxepG/r28WTYP5ndyMT0ugj7SE%3D"
         run: |
           curl --fail --location --retry 3 --max-time 75 "$DOWNLOAD_ZIP" -o /tmp/wolf-music.zip
           unzip -t /tmp/wolf-music.zip
-          unzip -p /tmp/wolf-music.zip app-debug.apk > WOLF_Music_v1.3.2.apk
-          test -s WOLF_Music_v1.3.2.apk
-          unzip -t WOLF_Music_v1.3.2.apk | tail -1
+          unzip -p /tmp/wolf-music.zip app-debug.apk > WOLF_Music_v1.3.3.apk
+          test -s WOLF_Music_v1.3.3.apk
+          unzip -t WOLF_Music_v1.3.3.apk | tail -1
       - name: Commit APK only to public distribution branch
         run: |
           git config user.name 'wolf-music-release-bot'
           git config user.email 'wolf-music-release-bot@users.noreply.github.com'
-          git add WOLF_Music_v1.3.2.apk
-          git commit -m 'Add WOLF Music v1.3.2 Android installation APK'
+          git add WOLF_Music_v1.3.3.apk
+          git commit -m 'Add WOLF Music v1.3.3 Android installation APK'
           git push origin HEAD:wolf-music-downloads
