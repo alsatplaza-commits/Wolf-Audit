@@ -65,7 +65,11 @@ def to_sbom(report: dict[str, Any]) -> dict[str, Any]:
             continue
         seen.add(ref)
         references[(
-            item["source_file"], item["ecosystem"], item["name"], str(item.get("version") or "")
+            item["source_file"],
+            {"cargo": "crates.io", "pypi": "PyPI", "npm": "npm"}.get(
+                item["ecosystem"], item["ecosystem"]
+            ),
+            item["name"], str(item.get("version") or "")
         )] = ref
         obj: dict[str, Any] = {
             "bom-ref": ref,
