@@ -10,6 +10,7 @@ from wolf_auditor.engine import scan
 from wolf_auditor.osv import enrich_with_osv
 from wolf_auditor.policy import evaluate, validate_policy
 from wolf_auditor.reporting import to_sarif
+from wolf_auditor.delta import compare_reports, verify_report
 
 POLICY = {"schema": "wolf-auditor.policy.v1", "block_at_or_above": "high", "require_osv": False}
 
@@ -94,6 +95,54 @@ class SecurityV03Tests(unittest.TestCase):
         report = enrich_with_osv(source, fetcher=stub)
         self.assertEqual(sum(len(q) for q in batches), 1)
         self.assertEqual(len(report["findings"]), 2)
+
+    def test_osv_malformed_non_object_is_incomplete(self):
+        report = enrich_with_osv(self.with_deps(), fetcher=lambda qs: [])
+        self.assertEqual(report["status"], "INCOMPLETE")
+
+    def test_default_policy_blocks_matched_advisory_even_if_review_level(self):
+        report = enrich_with_osv(self.with_deps(),
+                                 fetcher=lambda qs: {"results": [{"vulns": [{"id": "GHSA-aaaa-bbbb-cccc"}]}]})
+        verdict = evaluate(report, POLICY)
+        self.assertEqual(verdict["status"], "BLOCK")
+        self.assertIn("OSV_ADVISORY_MATCHED", verdict["reasons"])
+
+    def test_invalid_advisory_policy_option_rejected(self):
+        with self.assertRaises(ValueError):
+            validate_policy({**POLICY, "block_on_advisories": "false"})
+
+    def test_delta_reports_new_and_resolved_findings(self):
+        self.make("safe.py", "print('ok')\n")
+        before = scan(self.root)
+        self.make("bad.py", "eval('something')\n")
+        after = scan(self.root)
+        delta = compare_reports(before, after)
+        self.assertEqual(len(delta["new_findings"]), 1)
+        self.assertEqual(delta["resolved_findings"], [])
+        self.assertTrue(verify_report(after))
+        (self.root / "bad.py").unlink()
+        final = scan(self.root)
+        restored = compare_reports(after, final)
+        self.assertEqual(len(restored["resolved_findings"]), 1)
+
+    def test_delta_rejects_modified_evidence(self):
+        report = self.with_deps()
+        tampered = copy.deepcopy(report)
+        tampered["status"] = "INCOMPLETE"
+        self.assertFalse(verify_report(tampered))
+        with self.assertRaises(ValueError):
+            compare_reports(tampered, report)
+
+    def test_delta_rejects_other_target(self):
+        current = self.with_deps()
+        different = copy.deepcopy(current)
+        different["target_directory_name"] = "not-same"
+        from wolf_auditor.delta import _hash
+        different["report_sha256"] = _hash({
+            k: v for k, v in different.items() if k != "report_sha256"
+        })
+        with self.assertRaises(ValueError):
+            compare_reports(current, different)
 
     def test_policy_blocks_high(self):
         self.make("danger.py", 'eval("1+1")\n')
