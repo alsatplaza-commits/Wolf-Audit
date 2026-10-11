@@ -10,17 +10,20 @@ from pathlib import Path
 from typing import Any
 
 from .analysis import docker_sast, python_sast, workflow_sast
+from .iac import is_kubernetes_manifest, kubernetes_sast, terraform_sast
 from .supply_chain import inventory, is_manifest
 
-VERSION = "0.2.0-dev"
+VERSION = "0.3.0-dev"
 MAX_FILE_BYTES = 1_000_000
 MAX_FILES = 10_000
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "target", "dist", "build", "__pycache__", ".mypy_cache"}
 TEXT_EXT = {".rs", ".py", ".toml", ".yml", ".yaml"}
 UNSAFE_PATTERN = re.compile(r"\bunsafe\s*(?:\{|fn\b|impl\b|trait\b|extern\b)")
 SECRET_PATTERN = re.compile(
-    r"(?i)\b(?:api[_-]?key|secret[_-]?key|access[_-]?token)\s*[:=]\s*[\"']([^\"'\r\n]{12,})[\"']"
+    r"(?i)\b(?:api[_-]?key|secret[_-]?key|access[_-]?token|[A-Za-z0-9_]*password)\s*[:=]\s*[\"']?([^\"'\s]{12,})"
 )
+PRIVATE_KEY_PATTERN = re.compile(r"-----BEGIN (?:OPENSSH|RSA|EC|DSA|ENCRYPTED)?\s*PRIVATE KEY-----")
+GITHUB_TOKEN_PATTERN = re.compile(r"\b(?:ghp_|gho_|ghu_|ghs_|ghr_)[A-Za-z0-9_]{30,}|\bgithub_pat_[A-Za-z0-9_]{40,}")
 USES_PATTERN = re.compile(r"^\s*-\s*uses\s*:\s*([^\s#]+)")
 PINNED_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 
@@ -37,6 +40,7 @@ def scan(root: Path) -> dict[str, Any]:
     gaps: list[dict[str, str]] = []
     manifest: list[dict[str, str]] = []
     dependencies: list[dict[str, Any]] = []
+    excluded: list[dict[str, str]] = []
     scanned = 0
     stopped = False
 
@@ -51,6 +55,9 @@ def scan(root: Path) -> dict[str, Any]:
                     "path": candidate.relative_to(root).as_posix(),
                     "reason": "directory_symlink_not_followed",
                 })
+        for ignored in sorted(d for d in dirnames if d in SKIP_DIRS):
+            excluded.append({"path": (Path(directory) / ignored).relative_to(root).as_posix(),
+                             "reason": "excluded_generated_or_repository_metadata"})
         dirnames[:] = sorted(
             d for d in dirnames
             if d not in SKIP_DIRS and not (Path(directory) / d).is_symlink()
@@ -64,6 +71,8 @@ def scan(root: Path) -> dict[str, Any]:
                 or is_manifest(relative)
                 or name_lower == "dockerfile"
                 or name_lower.startswith("dockerfile.")
+                or name_lower.startswith(".env")
+                or file.suffix.lower() in {".tf", ".tfvars"}
             ):
                 continue
             if file.is_symlink():
@@ -102,6 +111,10 @@ def scan(root: Path) -> dict[str, Any]:
                             matched_rules.append(("ACTIONS_REF_NOT_SHA_PINNED", "medium"))
                 if SECRET_PATTERN.search(line):
                     matched_rules.append(("POTENTIAL_HARDCODED_SECRET", "high"))
+                if PRIVATE_KEY_PATTERN.search(line):
+                    matched_rules.append(("PRIVATE_KEY_MATERIAL", "high"))
+                if GITHUB_TOKEN_PATTERN.search(line):
+                    matched_rules.append(("GITHUB_TOKEN_LIKE_STRING", "high"))
                 for rule, severity in matched_rules:
                     # Never expose the matching line or secret value in the report.
                     findings.append({
@@ -120,6 +133,10 @@ def scan(root: Path) -> dict[str, Any]:
                 findings.extend(workflow_sast(relative, content))
             if name_lower == "dockerfile" or name_lower.startswith("dockerfile."):
                 findings.extend(docker_sast(relative, content))
+            if file.suffix.lower() in {".tf", ".tfvars"}:
+                findings.extend(terraform_sast(relative, content))
+            if is_kubernetes_manifest(relative):
+                findings.extend(kubernetes_sast(relative, content))
             if is_manifest(relative):
                 deps, extra, problems = inventory(relative, content)
                 dependencies.extend(deps)
@@ -130,6 +147,7 @@ def scan(root: Path) -> dict[str, Any]:
 
     findings.sort(key=lambda f: (f["path"], f["line"], f["rule"]))
     gaps.sort(key=lambda g: (g["path"], g["reason"]))
+    excluded.sort(key=lambda g: (g["path"], g["reason"]))
     dependencies.sort(key=lambda c: (c["source_file"], c["purl"]))
     evidence = {
         "schema": "wolf-auditor.evidence.v1",
@@ -138,6 +156,7 @@ def scan(root: Path) -> dict[str, Any]:
         "target_directory_name": root.name,
         "scanned_files": scanned,
         "file_manifest": manifest,
+        "excluded_paths": excluded,
         "dependency_components": dependencies,
         "dependency_inventory_scope": "offline manifests only; no CVE lookup or transitive verification",
         "findings": findings,
