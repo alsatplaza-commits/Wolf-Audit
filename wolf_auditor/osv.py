@@ -99,6 +99,8 @@ def enrich_with_osv(report: dict[str, Any], *, fetcher: Fetch | None = None) -> 
         ]
         try:
             data = fetch(queries)
+            if not isinstance(data, dict):
+                raise ValueError("OSV provider returned a non-object")
             results = data.get("results")
             if not isinstance(results, list) or len(results) != len(batch):
                 raise ValueError("OSV response/query count mismatch")
