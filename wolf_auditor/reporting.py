@@ -24,7 +24,12 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                     "region": {"startLine": max(1, int(f["line"]))},
                 }
             }],
-            "properties": {"verified_exploit": False, "evidence": "redacted"},
+            "properties": {
+                "verified_exploit": False,
+                "evidence": "redacted",
+                **({"osv_advisory_id": f["advisory_id"]}
+                   if f.get("rule") == "OSV_MATCHED_ADVISORY" and f.get("advisory_id") else {}),
+            },
         }
         for f in findings
     ]
@@ -53,11 +58,15 @@ def to_sbom(report: dict[str, Any]) -> dict[str, Any]:
     """CycloneDX 1.6 component inventory; NOT CVE analysis or complete transitive SBOM."""
     components = []
     seen: set[str] = set()
+    references: dict[tuple[str, str, str, str], str] = {}
     for item in report.get("dependency_components", []):
         ref = _digest([item["purl"], item["source_file"]])[:32]
         if ref in seen:
             continue
         seen.add(ref)
+        references[(
+            item["source_file"], item["ecosystem"], item["name"], str(item.get("version") or "")
+        )] = ref
         obj: dict[str, Any] = {
             "bom-ref": ref,
             "type": "library",
@@ -68,6 +77,26 @@ def to_sbom(report: dict[str, Any]) -> dict[str, Any]:
         if item.get("version"):
             obj["version"] = item["version"]
         components.append(obj)
+    vulnerabilities = []
+    for f in report.get("findings", []):
+        if f.get("rule") != "OSV_MATCHED_ADVISORY":
+            continue
+        package = f.get("package", {})
+        key = (
+            f["path"], package.get("ecosystem"), package.get("name"), str(package.get("version") or "")
+        )
+        ref = references.get(key)
+        if ref:
+            vulnerabilities.append({
+                "id": f["advisory_id"],
+                "source": {"name": "OSV", "url": f["advisory_url"]},
+                "affects": [{"ref": ref}],
+                "properties": [
+                    {"name": "wolf:exploit_verified", "value": "false"},
+                    {"name": "wolf:matching_method", "value": "OSV version-to-package query"},
+                ],
+            })
+    vulnerabilities.sort(key=lambda v: (v["id"], v["affects"][0]["ref"]))
     return {
         "bomFormat": "CycloneDX",
         "specVersion": "1.6",
@@ -76,6 +105,7 @@ def to_sbom(report: dict[str, Any]) -> dict[str, Any]:
             {"type": "application", "name": "WOLF AUDITOR", "version": report["version"]}
         ]}},
         "components": components,
+        "vulnerabilities": vulnerabilities,
         "properties": [
             {"name": "wolf:coverage", "value": report["status"]},
             {"name": "wolf:evidence_sha256", "value": report["report_sha256"]},
