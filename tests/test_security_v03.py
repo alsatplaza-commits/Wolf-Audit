@@ -7,6 +7,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from wolf_auditor.engine import scan
+from wolf_auditor.reporting import to_sbom
+from wolf_auditor.__main__ import main
+from contextlib import redirect_stderr, redirect_stdout
+import io
 from wolf_auditor.osv import enrich_with_osv
 from wolf_auditor.policy import evaluate, validate_policy
 from wolf_auditor.reporting import to_sarif
@@ -143,6 +147,40 @@ class SecurityV03Tests(unittest.TestCase):
         })
         with self.assertRaises(ValueError):
             compare_reports(current, different)
+
+    def test_sbom_contains_linked_osv_vulnerability(self):
+        source = self.with_deps()
+        report = enrich_with_osv(source, fetcher=lambda qs: {
+            "results": [{"vulns": [{"id": "GHSA-aaaa-bbbb-cccc"}]}]
+        })
+        bom = to_sbom(report)
+        self.assertEqual(len(bom["vulnerabilities"]), 1)
+        self.assertEqual(bom["vulnerabilities"][0]["id"], "GHSA-aaaa-bbbb-cccc")
+        self.assertEqual(bom["vulnerabilities"][0]["affects"][0]["ref"],
+                         bom["components"][0]["bom-ref"])
+        sarif = to_sarif(report)
+        self.assertEqual(sarif["runs"][0]["results"][0]["properties"]["osv_advisory_id"],
+                         "GHSA-aaaa-bbbb-cccc")
+
+    def test_cli_policy_block_and_gate_report(self):
+        self.make("danger.py", 'eval("1+1")\n')
+        policy_path = self.root / "audit-policy.json"
+        policy_path.write_text(json.dumps(POLICY), encoding="utf8")
+        gate_path = self.root / "gate.json"
+        args = ["wolf-auditor", str(self.root), "--policy", str(policy_path),
+                "--gate-output", str(gate_path), "--output", str(self.root / "audit.json")]
+        with patch("sys.argv", args), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            code = main()
+        self.assertEqual(code, 3)
+        self.assertEqual(json.loads(gate_path.read_text())["status"], "BLOCK")
+
+    def test_cli_requires_policy_for_gate_report(self):
+        self.make("safe.py", "print('hello')\n")
+        args = ["wolf-auditor", str(self.root), "--gate-output", str(self.root / "gate.json")]
+        with patch("sys.argv", args), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            code = main()
+        self.assertEqual(code, 2)
+        self.assertFalse((self.root / "gate.json").exists())
 
     def test_policy_blocks_high(self):
         self.make("danger.py", 'eval("1+1")\n')
