@@ -9,7 +9,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-VERSION = "0.1.0-dev"
+from .analysis import docker_sast, python_sast, workflow_sast
+from .supply_chain import inventory, is_manifest
+
+VERSION = "0.2.0-dev"
 MAX_FILE_BYTES = 1_000_000
 MAX_FILES = 10_000
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "target", "dist", "build", "__pycache__", ".mypy_cache"}
@@ -33,6 +36,7 @@ def scan(root: Path) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     gaps: list[dict[str, str]] = []
     manifest: list[dict[str, str]] = []
+    dependencies: list[dict[str, Any]] = []
     scanned = 0
     stopped = False
 
@@ -53,9 +57,15 @@ def scan(root: Path) -> dict[str, Any]:
         )
         for name in sorted(filenames):
             file = Path(directory) / name
-            if file.suffix.lower() not in TEXT_EXT:
-                continue
             relative = file.relative_to(root).as_posix()
+            name_lower = file.name.lower()
+            if not (
+                file.suffix.lower() in TEXT_EXT
+                or is_manifest(relative)
+                or name_lower == "dockerfile"
+                or name_lower.startswith("dockerfile.")
+            ):
+                continue
             if file.is_symlink():
                 gaps.append({"path": relative, "reason": "symlink_not_followed"})
                 continue
@@ -102,9 +112,25 @@ def scan(root: Path) -> dict[str, Any]:
                         "evidence": "heuristic_match_redacted",
                         "verified_exploit": False,
                     })
+            if file.suffix.lower() == ".py":
+                extra, problems = python_sast(relative, content)
+                findings.extend(extra)
+                gaps.extend(problems)
+            if file.suffix.lower() in {".yaml", ".yml"} and "/.github/workflows/" in f"/{relative}":
+                findings.extend(workflow_sast(relative, content))
+            if name_lower == "dockerfile" or name_lower.startswith("dockerfile."):
+                findings.extend(docker_sast(relative, content))
+            if is_manifest(relative):
+                deps, extra, problems = inventory(relative, content)
+                dependencies.extend(deps)
+                findings.extend(extra)
+                gaps.extend(problems)
         if stopped:
             break
 
+    findings.sort(key=lambda f: (f["path"], f["line"], f["rule"]))
+    gaps.sort(key=lambda g: (g["path"], g["reason"]))
+    dependencies.sort(key=lambda c: (c["source_file"], c["purl"]))
     evidence = {
         "schema": "wolf-auditor.evidence.v1",
         "version": VERSION,
@@ -112,6 +138,8 @@ def scan(root: Path) -> dict[str, Any]:
         "target_directory_name": root.name,
         "scanned_files": scanned,
         "file_manifest": manifest,
+        "dependency_components": dependencies,
+        "dependency_inventory_scope": "offline manifests only; no CVE lookup or transitive verification",
         "findings": findings,
         "coverage_gaps": gaps,
         "status": "INCOMPLETE" if gaps else ("REVIEW_REQUIRED" if findings else "NO_HEURISTIC_FINDINGS"),
