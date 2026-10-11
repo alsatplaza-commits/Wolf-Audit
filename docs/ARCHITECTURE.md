@@ -19,3 +19,7 @@
 ## Product rules
 
 **PRESERVE WORKING SYSTEMS. NO REFACTOR WITHOUT DEFECT. MINIMUM SAFE CHANGE.** Never mark a blocked security review as independently approved based solely on self-generated tests.
+
+- P1.5 (implemented prototype): Optional bounded OSV querybatch, fail-closed advisory handling, strict JSON release policies, Kubernetes/Terraform heuristics, .env/token/PEM indicators, deterministic report comparison, OSV/CycloneDX vulnerability references. All require explicit interpretation; neither OSV nor policy output independently certifies a product.
+- Network boundary: no package metadata leaves the machine unless `--osv-online` is provided; private scans must not use public CI artifacts.
+- Deliberately unsupported: DAST, native Windows fuzzing, memory exploit proof, broad taint/dataflow, signed reviewer attestation, full CVE completeness.
