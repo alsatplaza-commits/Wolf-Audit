@@ -47,6 +47,7 @@ class ExtendedAuditTests(unittest.TestCase):
         rules = [f["rule"] for f in scan(self.root)["findings"]]
         self.assertIn("ACTIONS_EVENT_EXPRESSION_IN_RUN", rules)
         self.assertIn("ACTIONS_WRITE_ALL_PERMISSIONS", rules)
+        self.assertIn("ACTIONS_PRIVILEGED_PR_TRIGGER_REVIEW", rules)
 
     def test_dockerfile_rules(self):
         self.put("Dockerfile", "FROM python:latest\nUSER root\n")
@@ -67,7 +68,7 @@ class ExtendedAuditTests(unittest.TestCase):
         }))
         items = scan(self.root)["dependency_components"]
         self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]["purl"], "pkg:npm/@types/node@20.1.0")
+        self.assertEqual(items[0]["purl"], "pkg:npm/%40types/node@20.1.0")
 
     def test_unpinned_requirements_warns(self):
         self.put("requirements.txt", "requests>=2.0\nflask==3.0.0\n")
@@ -103,6 +104,23 @@ class ExtendedAuditTests(unittest.TestCase):
         self.assertEqual(sarif["runs"][0]["results"][0]["ruleId"],
                          "POTENTIAL_HARDCODED_SECRET")
         self.assertEqual(to_sbom(report)["specVersion"], "1.6")
+
+    def test_requirement_direct_reference_coverage_is_incomplete(self):
+        self.put("requirements.txt", "service @ https://example.invalid/a.whl\\n".replace("\\n", "\n"))
+        report = scan(self.root)
+        self.assertEqual(report["status"], "INCOMPLETE")
+        self.assertEqual(report["coverage_gaps"][0]["reason"],
+                         "requirements_direct_reference_unresolved")
+
+    def test_odd_requirement_expression_does_not_mint_valid_sbom(self):
+        self.put("requirements.txt", "requests==https://example.invalid/secret\\n".replace("\\n", "\n"))
+        report = scan(self.root)
+        self.assertEqual(report["status"], "INCOMPLETE")
+        self.assertEqual(to_sbom(report)["components"], [])
+
+    def test_conditional_requirement_marker_is_not_silent(self):
+        self.put("requirements.txt", 'requests==2.1.0; python_version < "3.13"\\n'.replace("\\n", "\n"))
+        self.assertEqual(scan(self.root)["status"], "INCOMPLETE")
 
     def test_reproducible_reports(self):
         self.put("Cargo.lock", 'version = 3\n[[package]]\nname = "serde"\nversion = "1.0.1"\n')
