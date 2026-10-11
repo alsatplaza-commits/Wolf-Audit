@@ -1,0 +1,40 @@
+name: WOLF AUDITOR baseline checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  baseline:
+    name: Unit tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Python 3.11+
+        shell: bash
+        run: python --version
+      - name: Unit tests (safe fixtures)
+        shell: bash
+        run: python -m unittest discover -s tests -v
+      - name: Self-audit (read-only, explicit non-certification)
+        shell: bash
+        run: |
+          code=0
+          python -m wolf_auditor . --output wolf-auditor-self-report.json || code=$?
+          if [ "$code" -eq 2 ]; then
+            echo "INCOMPLETE scan; fail closed"
+            exit 2
+          fi
+          echo "Heuristic findings are inventory, not an independent security approval"
+          exit 0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: baseline-evidence-${{ matrix.os }}
+          path: wolf-auditor-self-report.json
+          if-no-files-found: ignore

@@ -1,0 +1,9 @@
+[project]
+name = "wolf-auditor"
+version = "0.1.0.dev0"
+description = "Early-stage, read-only, evidence-aware software security audit prototype"
+requires-python = ">=3.11"
+
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"

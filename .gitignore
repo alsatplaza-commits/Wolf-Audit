@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+.coverage
+reports/
+local-report.json
+wolf-auditor-self-report.json
+result.json
+.env
+.env.*
+!.env.example

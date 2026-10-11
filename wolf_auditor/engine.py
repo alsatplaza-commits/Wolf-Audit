@@ -1,0 +1,122 @@
+"""Read-only, heuristic audit engine. A baseline, NOT comprehensive SAST/DAST."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+from pathlib import Path
+from typing import Any
+
+VERSION = "0.1.0-dev"
+MAX_FILE_BYTES = 1_000_000
+MAX_FILES = 10_000
+SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "target", "dist", "build", "__pycache__", ".mypy_cache"}
+TEXT_EXT = {".rs", ".py", ".toml", ".yml", ".yaml"}
+UNSAFE_PATTERN = re.compile(r"\bunsafe\s*(?:\{|fn\b|impl\b|trait\b|extern\b)")
+SECRET_PATTERN = re.compile(
+    r"(?i)\b(?:api[_-]?key|secret[_-]?key|access[_-]?token)\s*[:=]\s*[\"']([^\"'\r\n]{12,})[\"']"
+)
+USES_PATTERN = re.compile(r"^\s*-\s*uses\s*:\s*([^\s#]+)")
+PINNED_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
+
+
+def _sha256(blob: bytes) -> str:
+    return hashlib.sha256(blob).hexdigest()
+
+
+def scan(root: Path) -> dict[str, Any]:
+    root = root.expanduser().resolve(strict=True)
+    if not root.is_dir():
+        raise ValueError("target must be an existing directory")
+    findings: list[dict[str, Any]] = []
+    gaps: list[dict[str, str]] = []
+    manifest: list[dict[str, str]] = []
+    scanned = 0
+    stopped = False
+
+    def walk_error(error: OSError) -> None:
+        gaps.append({"path": "<directory>", "reason": type(error).__name__})
+
+    for directory, dirnames, filenames in os.walk(root, topdown=True, followlinks=False, onerror=walk_error):
+        for directory_name in dirnames:
+            candidate = Path(directory) / directory_name
+            if candidate.is_symlink():
+                gaps.append({
+                    "path": candidate.relative_to(root).as_posix(),
+                    "reason": "directory_symlink_not_followed",
+                })
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if d not in SKIP_DIRS and not (Path(directory) / d).is_symlink()
+        )
+        for name in sorted(filenames):
+            file = Path(directory) / name
+            if file.suffix.lower() not in TEXT_EXT:
+                continue
+            relative = file.relative_to(root).as_posix()
+            if file.is_symlink():
+                gaps.append({"path": relative, "reason": "symlink_not_followed"})
+                continue
+            if scanned >= MAX_FILES:
+                gaps.append({"path": relative, "reason": "scan_file_budget_exceeded"})
+                stopped = True
+                break
+            try:
+                if file.stat().st_size > MAX_FILE_BYTES:
+                    gaps.append({"path": relative, "reason": "file_size_limit"})
+                    continue
+                blob = file.read_bytes()
+                if len(blob) > MAX_FILE_BYTES:
+                    gaps.append({"path": relative, "reason": "file_size_limit"})
+                    continue
+                content = blob.decode("utf-8")
+            except (OSError, UnicodeError) as error:
+                gaps.append({"path": relative, "reason": type(error).__name__})
+                continue
+            scanned += 1
+            manifest.append({"path": relative, "sha256": _sha256(blob)})
+            for line_number, line in enumerate(content.splitlines(), 1):
+                trimmed = line.lstrip()
+                if trimmed.startswith(("//", "#")):
+                    continue
+                matched_rules: list[tuple[str, str]] = []
+                if file.suffix.lower() == ".rs" and UNSAFE_PATTERN.search(line):
+                    matched_rules.append(("RUST_UNSAFE_INVENTORY", "review"))
+                if file.suffix.lower() in {".yaml", ".yml"} and ".github/workflows/" in f"/{relative}":
+                    use = USES_PATTERN.search(line)
+                    if use and not use.group(1).startswith("./"):
+                        action = use.group(1)
+                        if "@" not in action or not PINNED_PATTERN.fullmatch(action.rsplit("@", 1)[1]):
+                            matched_rules.append(("ACTIONS_REF_NOT_SHA_PINNED", "medium"))
+                if SECRET_PATTERN.search(line):
+                    matched_rules.append(("POTENTIAL_HARDCODED_SECRET", "high"))
+                for rule, severity in matched_rules:
+                    # Never expose the matching line or secret value in the report.
+                    findings.append({
+                        "rule": rule,
+                        "severity": severity,
+                        "path": relative,
+                        "line": line_number,
+                        "evidence": "heuristic_match_redacted",
+                        "verified_exploit": False,
+                    })
+        if stopped:
+            break
+
+    evidence = {
+        "schema": "wolf-auditor.evidence.v1",
+        "version": VERSION,
+        "scope": "read_only_heuristic_source_scan",
+        "target_directory_name": root.name,
+        "scanned_files": scanned,
+        "file_manifest": manifest,
+        "findings": findings,
+        "coverage_gaps": gaps,
+        "status": "INCOMPLETE" if gaps else ("REVIEW_REQUIRED" if findings else "NO_HEURISTIC_FINDINGS"),
+        "claim": "No security certification; passing is not proof of absence of vulnerabilities.",
+    }
+    canonical = json.dumps(evidence, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    evidence["report_sha256"] = _sha256(canonical)
+    return evidence
