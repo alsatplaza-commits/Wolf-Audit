@@ -9,7 +9,7 @@ import tomllib
 from typing import Any
 from urllib.parse import quote
 
-REQUIREMENTS = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]+\])?\s*(==|===|~=|!=|<=|>=|<|>)?\s*([^;\s]+)?")
+REQUIREMENTS = re.compile(r"([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]+\])?\s*(===|==|~=|!=|<=|>=|<|>)?\s*([A-Za-z0-9.*+_-]+)?")
 MAX_DEPENDENCIES = 10_000
 
 def is_manifest(path: str) -> bool:
@@ -17,7 +17,7 @@ def is_manifest(path: str) -> bool:
     return name in {"cargo.lock", "package-lock.json"} or (name.startswith("requirements") and name.endswith(".txt"))
 
 def _component(ecosystem: str, name: str, version: str | None, path: str) -> dict[str, Any]:
-    purl = f"pkg:{ecosystem}/{quote(name.lower(), safe='@/')}"
+    purl = f"pkg:{ecosystem}/{quote(name.lower(), safe='/')}"
     if version:
         purl += "@" + quote(str(version), safe="")
     return {"type": "library", "name": name, "version": str(version) if version else None,
@@ -81,7 +81,14 @@ def inventory(path: str, content: str) -> tuple[list[dict[str, Any]], list[dict[
                 if stripped.startswith(("-", "git+", "http:", "https:")):
                     gaps.append({"path": path, "reason": "requirements_directive_or_url_unresolved"})
                     continue
-                match = REQUIREMENTS.match(stripped)
+                if "://" in stripped or re.search(r"\s+@", stripped):
+                    gaps.append({"path": path, "reason": "requirements_direct_reference_unresolved"})
+                    continue
+                candidate = stripped.split(" #", 1)[0].strip()
+                if ";" in candidate:
+                    gaps.append({"path": path, "reason": "requirements_environment_marker_unresolved"})
+                    continue
+                match = REQUIREMENTS.fullmatch(candidate)
                 if not match:
                     gaps.append({"path": path, "reason": "requirements_parse_failed"})
                     continue
