@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 LEVELS = {"critical": 5, "high": 4, "medium": 3, "low": 2, "review": 1}
-ALLOWED_KEYS = {"schema", "block_at_or_above", "require_osv", "max_findings"}
+ALLOWED_KEYS = {"schema", "block_at_or_above", "require_osv", "max_findings", "block_on_advisories"}
 
 def validate_policy(policy: dict[str, Any]) -> dict[str, Any]:
     """Forbid unknown settings rather than silently accepting typo-based bypasses."""
@@ -20,11 +20,15 @@ def validate_policy(policy: dict[str, Any]) -> dict[str, Any]:
     require_osv = policy.get("require_osv", False)
     if not isinstance(require_osv, bool):
         raise ValueError("require_osv must be boolean")
+    block_on_advisories = policy.get("block_on_advisories", True)
+    if not isinstance(block_on_advisories, bool):
+        raise ValueError("block_on_advisories must be boolean")
     max_findings = policy.get("max_findings")
     if max_findings is not None and (type(max_findings) is not int or not 0 <= max_findings <= 100000):
         raise ValueError("max_findings must be nonnegative integer")
     return {"schema": "wolf-auditor.policy.v1", "block_at_or_above": threshold,
-            "require_osv": require_osv, "max_findings": max_findings}
+            "require_osv": require_osv, "max_findings": max_findings,
+            "block_on_advisories": block_on_advisories}
 
 
 def evaluate(report: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
@@ -48,6 +52,10 @@ def evaluate(report: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
             blocked += 1
     if blocked:
         failures.append("SEVERITY_THRESHOLD_EXCEEDED")
+    if policy["block_on_advisories"] and any(
+        isinstance(f, dict) and f.get("rule") == "OSV_MATCHED_ADVISORY" for f in findings
+    ):
+        failures.append("OSV_ADVISORY_MATCHED")
     maximum = policy["max_findings"]
     if maximum is not None and len(findings) > maximum:
         failures.append("FINDING_COUNT_EXCEEDED")
