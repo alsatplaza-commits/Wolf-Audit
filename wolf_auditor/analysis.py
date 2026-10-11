@@ -47,9 +47,9 @@ def workflow_sast(path: str, content: str) -> list[dict[str, Any]]:
         if not stripped or stripped.startswith("#"):
             continue
         if (
-            re.match(r"^\\s*pull_request_target\\s*:", line)
-            or re.match(r"^\\s*on:\\s*pull_request_target(?:\\s|$)", line)
-            or re.match(r"^\\s*-\\s*pull_request_target(?:\\s|$)", line)
+            re.match(r"^\s*pull_request_target\s*:", line)
+            or re.match(r"^\s*on:\s*pull_request_target(?:\s|$)", line)
+            or re.match(r"^\s*-\s*pull_request_target(?:\s|$)", line)
         ):
             findings.append(finding("ACTIONS_PRIVILEGED_PR_TRIGGER_REVIEW", "review", path, line_no))
         if re.match(r"^\s*permissions\s*:\s*write-all\b", line):
