@@ -18,15 +18,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -s WOLF_Music_v1.3.10.apk
+          test -s WOLF_Music_v1.3.11.apk
           test -s WOLF_Music_Latest.apk
-          cmp WOLF_Music_v1.3.10.apk WOLF_Music_Latest.apk
-          unzip -t WOLF_Music_v1.3.10.apk | tail -1
+          cmp WOLF_Music_v1.3.11.apk WOLF_Music_Latest.apk
+          unzip -t WOLF_Music_v1.3.11.apk | tail -1
           curl --fail --location --retry 3 --connect-timeout 15 --max-time 90 \
             'https://raw.githubusercontent.com/alsatplaza-commits/Wolf-Audit/wolf-music-downloads/WOLF_Music_Latest.apk' \
             -o /tmp/wolf-from-public-link.apk
-          cmp WOLF_Music_v1.3.10.apk /tmp/wolf-from-public-link.apk
-          sha256sum WOLF_Music_v1.3.10.apk /tmp/wolf-from-public-link.apk
+          cmp WOLF_Music_v1.3.11.apk /tmp/wolf-from-public-link.apk
+          sha256sum WOLF_Music_v1.3.11.apk /tmp/wolf-from-public-link.apk
       - name: Android build tools and signature
         shell: bash
         run: |
@@ -38,9 +38,9 @@ jobs:
           APKSIGNER="$SDK/build-tools/35.0.0/apksigner"
           AAPT="$SDK/build-tools/35.0.0/aapt"
           test -x "$APKSIGNER" && test -x "$AAPT"
-          "$APKSIGNER" verify --verbose --print-certs --min-sdk-version 26 WOLF_Music_v1.3.10.apk
-          "$AAPT" dump badging WOLF_Music_v1.3.10.apk | head -8
-          "$AAPT" dump badging WOLF_Music_v1.3.10.apk | grep -q "package: name='com.wolfsensec.music'"
+          "$APKSIGNER" verify --verbose --print-certs --min-sdk-version 26 WOLF_Music_v1.3.11.apk
+          "$AAPT" dump badging WOLF_Music_v1.3.11.apk | head -8
+          "$AAPT" dump badging WOLF_Music_v1.3.11.apk | grep -q "package: name='com.wolfsensec.music'"
       - name: Prepare Android APK named for phone download
         run: cp WOLF_Music_Latest.apk WOLF_Music.apk
       - name: Publish genuine GitHub Release APK asset
@@ -49,11 +49,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view v1.3.10 >/dev/null 2>&1; then
-            gh release upload v1.3.10 WOLF_Music_v1.3.10.apk WOLF_Music.apk --clobber
+          if gh release view v1.3.11 >/dev/null 2>&1; then
+            gh release upload v1.3.11 WOLF_Music_v1.3.11.apk WOLF_Music.apk --clobber
           else
-            gh release create v1.3.10 WOLF_Music_v1.3.10.apk WOLF_Music.apk \
-              --target wolf-music-downloads --title "WOLF Music v1.3.10 • Android" \
+            gh release create v1.3.11 WOLF_Music_v1.3.11.apk WOLF_Music.apk \
+              --target wolf-music-downloads --title "WOLF Music v1.3.11 • Android" \
               --notes "Android APK, no GitHub login required. Music player / WOLF STAGE / PCM stereo L/R. Requires Android 8+. Test build, not an App Store release."
           fi
       - name: Verify release download byte-for-byte
@@ -63,6 +63,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/check-release
-          gh release download v1.3.10 --pattern WOLF_Music.apk --dir /tmp/check-release
-          cmp WOLF_Music_v1.3.10.apk /tmp/check-release/WOLF_Music.apk
+          gh release download v1.3.11 --pattern WOLF_Music.apk --dir /tmp/check-release
+          cmp WOLF_Music_v1.3.11.apk /tmp/check-release/WOLF_Music.apk
           echo 'RELEASE APK CHECK PASS'
