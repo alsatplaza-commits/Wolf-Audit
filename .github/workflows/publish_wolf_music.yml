@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Download signed Android APK from private CI artifact
         env:
-          DOWNLOAD_ZIP: "https://sdmntpritalynorth.oaiusercontent.com/files/00000000-bf9c-8246-bf3c-a592ff80e98e/raw?se=2026-10-12T05%3A50%3A14Z&sp=r&sv=2026-02-06&sr=b&scid=8b602c77-c3dc-52da-a014-95a67bbf6d76&skoid=82a3371f-2f6c-4f81-8a78-2701b362559b&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-10-12T02%3A57%3A11Z&ske=2026-10-13T02%3A57%3A11Z&sks=b&skv=2026-02-06&sig=7wNPaMbYvzNZVzYC0v7y3Du01JE5Wi4hoOhTLCZGPE8%3D"
+          DOWNLOAD_ZIP: "https://sdmntpritalynorth.oaiusercontent.com/files/00000000-6e78-8246-9cb6-f3f69f70e8ed/raw?se=2026-10-12T05%3A53%3A44Z&sp=r&sv=2026-02-06&sr=b&scid=32f0164a-2b70-5fad-90db-ec4349e14818&skoid=82a3371f-2f6c-4f81-8a78-2701b362559b&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-10-12T04%3A07%3A58Z&ske=2026-10-13T04%3A07%3A58Z&sks=b&skv=2026-02-06&sig=jyss3DrOEIUtT4IPrdzaHWjsOrx9YC/uIiJS91vVSkU%3D"
         run: |
           curl --fail --location --retry 3 --max-time 75 "$DOWNLOAD_ZIP" -o /tmp/wolf-music.zip
           unzip -t /tmp/wolf-music.zip
