@@ -13,18 +13,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: Download signed Android APK from private CI artifact
         env:
-          DOWNLOAD_ZIP: "https://sdmntpritalynorth.oaiusercontent.com/files/00000000-6ee0-8246-85f5-8eed8c5bd4dd/raw?se=2026-10-12T03%3A35%3A26Z&sp=r&sv=2026-02-06&sr=b&scid=8ecc6639-ebb1-5625-a9c7-6d7de24db8b9&skoid=82a3371f-2f6c-4f81-8a78-2701b362559b&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-10-12T02%3A57%3A12Z&ske=2026-10-13T02%3A57%3A12Z&sks=b&skv=2026-02-06&sig=zI2eWBFSP9SFg2OR8Nlak%2BcSo8P1CgSGGgXzcA/GQNo%3D"
+          DOWNLOAD_ZIP: "https://sdmntpritalynorth.oaiusercontent.com/files/00000000-fc98-8246-b5e1-24fd5f57beeb/raw?se=2026-10-12T03%3A43%3A43Z&sp=r&sv=2026-02-06&sr=b&scid=633d4300-0821-51d0-9921-f34bf59b0b0b&skoid=82a3371f-2f6c-4f81-8a78-2701b362559b&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-10-11T22%3A44%3A34Z&ske=2026-10-12T22%3A44%3A34Z&sks=b&skv=2026-02-06&sig=P6nQmFhGe6lzR73Gb69Y0ANP3ix1rIh47vt6Nu8NLzw%3D"
         run: |
           curl --fail --location --retry 3 --max-time 75 "$DOWNLOAD_ZIP" -o /tmp/wolf-music.zip
           unzip -t /tmp/wolf-music.zip
-          unzip -p /tmp/wolf-music.zip app-debug.apk > WOLF_Music_v1.3.9.apk
-          cp WOLF_Music_v1.3.9.apk WOLF_Music_Latest.apk
-          test -s WOLF_Music_v1.3.9.apk
-          unzip -t WOLF_Music_v1.3.9.apk | tail -1
+          unzip -p /tmp/wolf-music.zip app-debug.apk > WOLF_Music_v1.3.10.apk
+          cp WOLF_Music_v1.3.10.apk WOLF_Music_Latest.apk
+          test -s WOLF_Music_v1.3.10.apk
+          unzip -t WOLF_Music_v1.3.10.apk | tail -1
       - name: Commit APK only to public distribution branch
         run: |
           git config user.name 'wolf-music-release-bot'
           git config user.email 'wolf-music-release-bot@users.noreply.github.com'
-          git add WOLF_Music_v1.3.9.apk WOLF_Music_Latest.apk
-          git commit -m 'Add WOLF Music v1.3.9 Android installation APK'
+          git add WOLF_Music_v1.3.10.apk WOLF_Music_Latest.apk
+          git commit -m 'Add WOLF Music v1.3.10 Android installation APK'
           git push origin HEAD:wolf-music-downloads
