@@ -27,6 +27,7 @@ jobs:
             -o /tmp/wolf-from-public-link.apk
           cmp WOLF_Music_v1.3.8.apk /tmp/wolf-from-public-link.apk
           sha256sum WOLF_Music_v1.3.8.apk /tmp/wolf-from-public-link.apk
+      - uses: android-actions/setup-android@v3
       - name: Android build tools and signature
         shell: bash
         run: |
