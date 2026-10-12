@@ -1,0 +1,63 @@
+name: Verify and distribute installable WOLF Music
+on:
+  push:
+    branches: [wolf-music-downloads]
+    paths: ['.github/workflows/wolf_music_verify_release.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  verify-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: wolf-music-downloads
+      - name: Verify the exact public APK bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s WOLF_Music_v1.3.8.apk
+          test -s WOLF_Music_Latest.apk
+          cmp WOLF_Music_v1.3.8.apk WOLF_Music_Latest.apk
+          unzip -t WOLF_Music_v1.3.8.apk | tail -1
+          curl --fail --location --retry 3 --connect-timeout 15 --max-time 90 \
+            'https://raw.githubusercontent.com/alsatplaza-commits/Wolf-Audit/wolf-music-downloads/WOLF_Music_Latest.apk' \
+            -o /tmp/wolf-from-public-link.apk
+          cmp WOLF_Music_v1.3.8.apk /tmp/wolf-from-public-link.apk
+          sha256sum WOLF_Music_v1.3.8.apk /tmp/wolf-from-public-link.apk
+      - name: Android build tools and signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'y' | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install 'build-tools;35.0.0' >/dev/null
+          APKSIGNER="${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools/35.0.0/apksigner"
+          AAPT="${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools/35.0.0/aapt"
+          "$APKSIGNER" verify --verbose --print-certs --min-sdk-version 26 WOLF_Music_v1.3.8.apk
+          "$AAPT" dump badging WOLF_Music_v1.3.8.apk | head -8
+          "$AAPT" dump badging WOLF_Music_v1.3.8.apk | grep -q "package: name='com.wolfsensec.music'"
+      - name: Publish genuine GitHub Release APK asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view v1.3.8 >/dev/null 2>&1; then
+            gh release upload v1.3.8 WOLF_Music_v1.3.8.apk 'WOLF_Music_Latest.apk#WOLF_Music.apk' --clobber
+          else
+            gh release create v1.3.8 WOLF_Music_v1.3.8.apk 'WOLF_Music_Latest.apk#WOLF_Music.apk' \
+              --target wolf-music-downloads --title "WOLF Music v1.3.8 • Android" \
+              --notes "Android APK, no GitHub login required. Music player / WOLF STAGE / PCM stereo L/R. Requires Android 8+. Test build, not an App Store release."
+          fi
+      - name: Verify release download byte-for-byte
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/check-release
+          gh release download v1.3.8 --pattern WOLF_Music.apk --dir /tmp/check-release
+          cmp WOLF_Music_v1.3.8.apk /tmp/check-release/WOLF_Music.apk
+          echo 'RELEASE APK CHECK PASS'
