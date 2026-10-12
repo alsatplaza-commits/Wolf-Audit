@@ -41,6 +41,8 @@ jobs:
           "$APKSIGNER" verify --verbose --print-certs --min-sdk-version 26 WOLF_Music_v1.3.8.apk
           "$AAPT" dump badging WOLF_Music_v1.3.8.apk | head -8
           "$AAPT" dump badging WOLF_Music_v1.3.8.apk | grep -q "package: name='com.wolfsensec.music'"
+      - name: Prepare Android APK named for phone download
+        run: cp WOLF_Music_Latest.apk WOLF_Music.apk
       - name: Publish genuine GitHub Release APK asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -48,9 +50,9 @@ jobs:
         run: |
           set -euo pipefail
           if gh release view v1.3.8 >/dev/null 2>&1; then
-            gh release upload v1.3.8 WOLF_Music_v1.3.8.apk 'WOLF_Music_Latest.apk#WOLF_Music.apk' --clobber
+            gh release upload v1.3.8 WOLF_Music_v1.3.8.apk WOLF_Music.apk --clobber
           else
-            gh release create v1.3.8 WOLF_Music_v1.3.8.apk 'WOLF_Music_Latest.apk#WOLF_Music.apk' \
+            gh release create v1.3.8 WOLF_Music_v1.3.8.apk WOLF_Music.apk \
               --target wolf-music-downloads --title "WOLF Music v1.3.8 • Android" \
               --notes "Android APK, no GitHub login required. Music player / WOLF STAGE / PCM stereo L/R. Requires Android 8+. Test build, not an App Store release."
           fi
