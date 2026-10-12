@@ -27,15 +27,17 @@ jobs:
             -o /tmp/wolf-from-public-link.apk
           cmp WOLF_Music_v1.3.8.apk /tmp/wolf-from-public-link.apk
           sha256sum WOLF_Music_v1.3.8.apk /tmp/wolf-from-public-link.apk
-      - uses: android-actions/setup-android@v3
       - name: Android build tools and signature
         shell: bash
         run: |
           set -euo pipefail
-          echo 'y' | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install 'build-tools;35.0.0' >/dev/null
-          APKSIGNER="${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools/35.0.0/apksigner"
-          AAPT="${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools/35.0.0/aapt"
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [ ! -x "$SDK/build-tools/35.0.0/apksigner" ]; then
+            "$SDK/cmdline-tools/latest/bin/sdkmanager" --install 'build-tools;35.0.0' >/dev/null
+          fi
+          APKSIGNER="$SDK/build-tools/35.0.0/apksigner"
+          AAPT="$SDK/build-tools/35.0.0/aapt"
+          test -x "$APKSIGNER" && test -x "$AAPT"
           "$APKSIGNER" verify --verbose --print-certs --min-sdk-version 26 WOLF_Music_v1.3.8.apk
           "$AAPT" dump badging WOLF_Music_v1.3.8.apk | head -8
           "$AAPT" dump badging WOLF_Music_v1.3.8.apk | grep -q "package: name='com.wolfsensec.music'"
