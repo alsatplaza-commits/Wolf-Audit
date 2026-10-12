@@ -19,7 +19,7 @@ jobs:
         run: |
           set -euo pipefail
           test -s WOLF_Music_v1.3.12.apk
-          echo '292b8cb45b862c6c7d241a84463881cad402a937ccc529e6c4c500149bc95f13  WOLF_Music_v1.3.12.apk' | sha256sum -c -
+          echo '1d7588649a983da3ac96c64e7752561daabb1e45d37d45209372b729513863a9  WOLF_Music_v1.3.12.apk' | sha256sum -c -
           test -s WOLF_Music_Latest.apk
           cmp WOLF_Music_v1.3.12.apk WOLF_Music_Latest.apk
           unzip -t WOLF_Music_v1.3.12.apk | tail -1
