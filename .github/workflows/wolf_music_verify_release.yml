@@ -18,16 +18,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -s WOLF_Music_v1.3.12.apk
-          echo '1d7588649a983da3ac96c64e7752561daabb1e45d37d45209372b729513863a9  WOLF_Music_v1.3.12.apk' | sha256sum -c -
+          test -s WOLF_Music_v1.3.13.apk
+          echo 'a9f6319b6adb634ac041de03fd6d5bb0b501e41b53c47121b92562fb5eb2c545  WOLF_Music_v1.3.13.apk' | sha256sum -c -
           test -s WOLF_Music_Latest.apk
-          cmp WOLF_Music_v1.3.12.apk WOLF_Music_Latest.apk
-          unzip -t WOLF_Music_v1.3.12.apk | tail -1
+          cmp WOLF_Music_v1.3.13.apk WOLF_Music_Latest.apk
+          unzip -t WOLF_Music_v1.3.13.apk | tail -1
           curl --fail --location --retry 3 --connect-timeout 15 --max-time 90 \
             'https://raw.githubusercontent.com/alsatplaza-commits/Wolf-Audit/wolf-music-downloads/WOLF_Music_Latest.apk' \
             -o /tmp/wolf-from-public-link.apk
-          cmp WOLF_Music_v1.3.12.apk /tmp/wolf-from-public-link.apk
-          sha256sum WOLF_Music_v1.3.12.apk /tmp/wolf-from-public-link.apk
+          cmp WOLF_Music_v1.3.13.apk /tmp/wolf-from-public-link.apk
+          sha256sum WOLF_Music_v1.3.13.apk /tmp/wolf-from-public-link.apk
       - name: Android build tools and signature
         shell: bash
         run: |
@@ -39,9 +39,9 @@ jobs:
           APKSIGNER="$SDK/build-tools/35.0.0/apksigner"
           AAPT="$SDK/build-tools/35.0.0/aapt"
           test -x "$APKSIGNER" && test -x "$AAPT"
-          "$APKSIGNER" verify --verbose --print-certs --min-sdk-version 26 WOLF_Music_v1.3.12.apk
-          "$AAPT" dump badging WOLF_Music_v1.3.12.apk | head -8
-          "$AAPT" dump badging WOLF_Music_v1.3.12.apk | grep -q "package: name='com.wolfsensec.music'"
+          "$APKSIGNER" verify --verbose --print-certs --min-sdk-version 26 WOLF_Music_v1.3.13.apk
+          "$AAPT" dump badging WOLF_Music_v1.3.13.apk | head -8
+          "$AAPT" dump badging WOLF_Music_v1.3.13.apk | grep -q "package: name='com.wolfsensec.music'"
       - name: Prepare Android APK named for phone download
         run: cp WOLF_Music_Latest.apk WOLF_Music.apk
       - name: Publish genuine GitHub Release APK asset
@@ -50,11 +50,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view v1.3.12 >/dev/null 2>&1; then
-            gh release upload v1.3.12 WOLF_Music_v1.3.12.apk WOLF_Music.apk --clobber
+          if gh release view v1.3.13 >/dev/null 2>&1; then
+            gh release upload v1.3.13 WOLF_Music_v1.3.13.apk WOLF_Music.apk --clobber
           else
-            gh release create v1.3.12 WOLF_Music_v1.3.12.apk WOLF_Music.apk \
-              --target wolf-music-downloads --title "WOLF Music v1.3.12 • Android" \
+            gh release create v1.3.13 WOLF_Music_v1.3.13.apk WOLF_Music.apk \
+              --target wolf-music-downloads --title "WOLF Music v1.3.13 • Android" \
               --notes "Android APK, no GitHub login required. Music player / WOLF STAGE / PCM stereo L/R. Requires Android 8+. Test build, not an App Store release."
           fi
       - name: Verify release download byte-for-byte
@@ -64,6 +64,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/check-release
-          gh release download v1.3.12 --pattern WOLF_Music.apk --dir /tmp/check-release
-          cmp WOLF_Music_v1.3.12.apk /tmp/check-release/WOLF_Music.apk
+          gh release download v1.3.13 --pattern WOLF_Music.apk --dir /tmp/check-release
+          cmp WOLF_Music_v1.3.13.apk /tmp/check-release/WOLF_Music.apk
           echo 'RELEASE APK CHECK PASS'
