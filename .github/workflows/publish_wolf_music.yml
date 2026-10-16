@@ -3,28 +3,17 @@ on:
   push:
     branches: [wolf-music-downloads]
     paths: ['.github/workflows/publish_wolf_music.yml']
+  workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - name: Download signed Android APK from private CI artifact
-        env:
-          DOWNLOAD_ZIP: "https://sdmntprindiasocentral.oaiusercontent.com/files/00000000-ba80-8211-a685-4f8ef2841361/raw?se=2026-10-13T17%3A38%3A55Z&sp=r&sv=2026-02-06&sr=b&scid=6c2d2d3f-011b-523a-89cb-1871362d291a&skoid=002823aa-689d-47ca-9347-108c20f4f00d&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-10-13T05%3A52%3A48Z&ske=2026-10-14T05%3A52%3A48Z&sks=b&skv=2026-02-06&sig=Jo6PLWm8PVIwfTLeaBl1KoW3dLS3lZ5Vms07HPHGj0Y%3D"
+      - name: Refuse signed object downloads
+        shell: bash
         run: |
-          curl --fail --location --retry 3 --max-time 75 "$DOWNLOAD_ZIP" -o /tmp/wolf-music.zip
-          unzip -t /tmp/wolf-music.zip
-          unzip -p /tmp/wolf-music.zip app-debug.apk > WOLF_Music_v1.3.14.apk
-          cp WOLF_Music_v1.3.14.apk WOLF_Music_Latest.apk
-          test -s WOLF_Music_v1.3.14.apk
-          unzip -t WOLF_Music_v1.3.14.apk | tail -1
-      - name: Commit APK only to public distribution branch
-        run: |
-          git config user.name 'wolf-music-release-bot'
-          git config user.email 'wolf-music-release-bot@users.noreply.github.com'
-          git add WOLF_Music_v1.3.14.apk WOLF_Music_Latest.apk
-          git commit -m 'Add WOLF Music v1.3.14 Android installation APK'
-          git push origin HEAD:wolf-music-downloads
+          echo "Automatic fetch of a signed object URL is disabled."
+          echo "This workflow does not download, commit, or push."
+          exit 1
