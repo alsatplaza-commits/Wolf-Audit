@@ -143,6 +143,7 @@ class AuthorizationTests(unittest.TestCase):
             self.skipTest("git unavailable")
         self.make("a.rs", "fn safe() {}\n")
         self.git("init", "-b", "main")
+        self.git("config", "core.autocrlf", "false")
         self.git("add", "a.rs")
         self.git("-c", "user.email=wolf-auditor@example.com", "-c", "user.name=WOLF AUDITOR Test",
                  "commit", "-m", "test")
@@ -160,6 +161,7 @@ class AuthorizationTests(unittest.TestCase):
             self.skipTest("git unavailable")
         self.make("a.rs", "fn safe() {}\n")
         self.git("init", "-b", "main")
+        self.git("config", "core.autocrlf", "false")
         self.git("add", "a.rs")
         self.git("-c", "user.email=wolf-auditor@example.com", "-c", "user.name=WOLF AUDITOR Test",
                  "commit", "-m", "test")

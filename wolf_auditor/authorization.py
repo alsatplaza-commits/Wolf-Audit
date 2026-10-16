@@ -225,4 +225,8 @@ def _clean_local_head(root: Path, sha: str) -> bool:
         return False
     if toplevel.returncode != 0:
         return False
-    return os.path.normcase(toplevel.stdout.strip()) == os.path.normcase(os.fspath(root))
+    reported = toplevel.stdout.strip()
+    try:
+        return os.path.samefile(reported, root)
+    except OSError:
+        return os.path.normcase(os.path.normpath(reported)) == os.path.normcase(os.path.normpath(os.fspath(root)))
