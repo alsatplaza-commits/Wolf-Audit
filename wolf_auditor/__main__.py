@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from .authorization import load_customer_authorization
+from .authorization import confine_target, load_customer_authorization, read_bounded_regular, write_contained_text
 from .engine import scan
 from .reporting import to_sarif, to_sbom
 from .osv import enrich_with_osv
@@ -45,6 +45,7 @@ def main() -> int:
             if customer_id is not None and customer_id != loaded:
                 raise ValueError("customer id rejected")
             customer_id = loaded
+        _root, boundary, _scope = confine_target(args.target, args.authorized_root, customer_id)
         report = scan(
             args.target,
             customer_id=customer_id,
@@ -56,15 +57,11 @@ def main() -> int:
             report = enrich_with_osv(report)
         delta = None
         if args.baseline:
-            if args.baseline.stat().st_size > 10_000_000:
-                raise ValueError("baseline report exceeds 10 MB")
-            previous = json.loads(args.baseline.read_text(encoding="utf-8"))
+            previous = json.loads(read_bounded_regular(args.baseline, 10_000_000, kind="baseline").decode("utf-8"))
             delta = compare_reports(previous, report)
         verdict = None
         if args.policy:
-            if args.policy.stat().st_size > 65_536:
-                raise ValueError("policy file exceeds 64 KiB")
-            policy_data = json.loads(args.policy.read_text(encoding="utf-8"))
+            policy_data = json.loads(read_bounded_regular(args.policy, 65_536, kind="policy").decode("utf-8"))
             verdict = evaluate(report, policy_data)
         result = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
         outputs = [
@@ -77,9 +74,8 @@ def main() -> int:
              if delta is not None else ""),
         ]
         for destination, data in outputs:
-            if destination is not None:
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_text(data, encoding="utf-8")
+            if destination is not None and data != "":
+                write_contained_text(destination, data, boundary)
         if args.output is None:
             sys.stdout.write(result)
         print(

@@ -43,7 +43,7 @@ python -m wolf_auditor /path/to/authorized-project --baseline previous-report.js
 python -m wolf_auditor /path/to/customer-project --customer-id acme --authorized-root /path/to/customer-project --output scoped.json
 ```
 
-`--customer-id` accepts one customer. A second customer, a path, or a combined id is rejected. `--customer-authorization` must be a regular JSON file with schema `wolf-auditor.customer-authorization.v1` and exactly one `customer_id`; symlink authorization files and extra customers are rejected. `--commit` is accepted only when that full object id is the clean local `HEAD` of the scan root. Any other commit claim is rejected and the scan stays `INCOMPLETE`. None of these results is a security certification.
+`--customer-id` accepts one customer. A second customer, a path, a combined id, or a duplicated JSON key is rejected. `--customer-authorization` must be a regular JSON file with schema `wolf-auditor.customer-authorization.v1` and exactly one `customer_id`; symlink authorization files and extra customers are rejected. `--commit` is accepted only when that full object id is the clean local `HEAD` of the scan root, with no ignored, assume-unchanged, skip-worktree, or sparse-checkout difference. Any other commit claim is rejected and the scan stays `INCOMPLETE`. When a customer is bound, `--output` and the other evidence files must stay inside that customer directory and must not be symlinks. None of these results is a security certification.
 
 Exit codes without policy: `0` no findings; `1` review findings; `2` incomplete/error.
 With policy: `0` policy PASS, `3` policy BLOCK, `2` incomplete/error.

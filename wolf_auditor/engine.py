@@ -15,6 +15,7 @@ from .authorization import (
     RejectedSymlink,
     assess_commit_claim,
     confine_target,
+    is_unfollowed_link,
     read_regular_file,
 )
 from .iac import is_kubernetes_manifest, kubernetes_sast, terraform_sast
@@ -46,7 +47,7 @@ def scan(
     authorized_root: Path | None = None,
     commit_claim: str | None = None,
 ) -> dict[str, Any]:
-    root, scope = confine_target(root, authorized_root, customer_id)
+    root, _boundary, scope = confine_target(root, authorized_root, customer_id)
     findings: list[dict[str, Any]] = []
     gaps: list[dict[str, str]] = []
     manifest: list[dict[str, str]] = []
@@ -61,7 +62,7 @@ def scan(
     for directory, dirnames, filenames in os.walk(root, topdown=True, followlinks=False, onerror=walk_error):
         for directory_name in dirnames:
             candidate = Path(directory) / directory_name
-            if candidate.is_symlink():
+            if is_unfollowed_link(candidate):
                 relative_dir = candidate.relative_to(root).as_posix()
                 gaps.append({
                     "path": relative_dir,
@@ -76,7 +77,7 @@ def scan(
                              "reason": "excluded_generated_or_repository_metadata"})
         dirnames[:] = sorted(
             d for d in dirnames
-            if d not in SKIP_DIRS and not (Path(directory) / d).is_symlink()
+            if d not in SKIP_DIRS and not is_unfollowed_link(Path(directory) / d)
         )
         for name in sorted(filenames):
             file = Path(directory) / name
@@ -91,7 +92,7 @@ def scan(
                 or file.suffix.lower() in {".tf", ".tfvars"}
             ):
                 continue
-            if file.is_symlink():
+            if is_unfollowed_link(file):
                 gaps.append({"path": relative, "reason": "symlink_not_followed"})
                 gaps.append({"path": relative, "reason": "symlink_target_rejected"})
                 continue

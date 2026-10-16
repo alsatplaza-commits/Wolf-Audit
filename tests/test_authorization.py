@@ -200,6 +200,124 @@ class AuthorizationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "symlink authorization file rejected"):
             load_customer_authorization(link)
 
+    def test_duplicate_customer_key_is_rejected(self):
+        path = self.root / "auth.json"
+        path.write_text(
+            '{"schema":"wolf-auditor.customer-authorization.v1",'
+            '"customer_id":"acme","customer_id":"beta"}',
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "customer authorization rejected"):
+            load_customer_authorization(path)
+
+    def test_parent_traversal_cannot_leave_customer_root(self):
+        secret = "TRAVERSAL_SECRET_VALUE_123456789"
+        customer = self.root / "acme"
+        other = self.root / "beta"
+        customer.mkdir()
+        self.make("leak.py", f'api_key = "{secret}"\n', root=other)
+        self.make("ok.rs", "fn safe() {}\n", root=customer)
+        with self.assertRaisesRegex(ValueError, "outside the authorized customer root"):
+            scan(customer / ".." / "beta", customer_id="acme", authorized_root=customer)
+
+    def test_bound_output_outside_customer_root_is_not_written(self):
+        self.make("a.rs", "fn safe() {}\n")
+        stolen = Path(self.outside.name) / "stolen.json"
+        args = ["wolf-auditor", str(self.root), "--customer-id", "acme",
+                "--authorized-root", str(self.root), "--output", str(stolen)]
+        with patch("sys.argv", args), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            code = main()
+        self.assertEqual(code, 2)
+        self.assertFalse(stolen.exists())
+
+    def test_symlink_output_does_not_overwrite_another_file(self):
+        self.make("a.rs", "fn safe() {}\n")
+        victim = Path(self.outside.name) / "victim.txt"
+        original = "VICTIM_FILE_CONTENTS_SHOULD_STAY"
+        victim.write_text(original, encoding="utf-8")
+        link = self.root / "report.json"
+        try:
+            link.symlink_to(victim)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable")
+        args = ["wolf-auditor", str(self.root), "--customer-id", "acme", "--output", str(link)]
+        with patch("sys.argv", args), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            code = main()
+        self.assertEqual(code, 2)
+        self.assertEqual(victim.read_text(encoding="utf-8"), original)
+
+    def test_symlink_policy_file_is_not_read(self):
+        self.make("a.rs", "fn safe() {}\n")
+        policy = Path(self.outside.name) / "policy.json"
+        policy.write_text(json.dumps({
+            "schema": "wolf-auditor.policy.v1",
+            "block_at_or_above": "high",
+            "require_osv": False,
+        }), encoding="utf-8")
+        link = self.root / "policy.json"
+        gate = self.root / "gate.json"
+        try:
+            link.symlink_to(policy)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable")
+        args = ["wolf-auditor", str(self.root), "--policy", str(link), "--gate-output", str(gate)]
+        with patch("sys.argv", args), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            code = main()
+        self.assertEqual(code, 2)
+        self.assertFalse(gate.exists())
+
+    def test_ignored_file_rejects_commit_claim(self):
+        if shutil.which("git") is None:
+            self.skipTest("git unavailable")
+        secret = "IGNORED_SECRET_VALUE_123456789"
+        self.make("a.rs", "fn safe() {}\n")
+        self.make(".gitignore", "*.py\n")
+        self._commit_head()
+        self.make("hidden.py", f'api_key = "{secret}"\n')
+        sha = self.git("rev-parse", "HEAD").stdout.strip()
+        report = scan(self.root, customer_id="acme", commit_claim=sha)
+        self.assertEqual(report["commit_claim"]["status"], "rejected")
+        self.assertFalse(report["commit_claim"]["accepted"])
+        self.assertFalse(report["commit_claim"]["certification"])
+        self.assertNotIn(secret, json.dumps(report))
+        self.assertNotIn(sha, json.dumps(report["commit_claim"]))
+
+    def test_assume_unchanged_rejects_commit_claim(self):
+        if shutil.which("git") is None:
+            self.skipTest("git unavailable")
+        self.make("a.rs", "fn safe() {}\n")
+        self._commit_head()
+        sha = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("update-index", "--assume-unchanged", "a.rs")
+        self.make("a.rs", "fn safe() { /* hidden */ }\n")
+        report = scan(self.root, customer_id="acme", commit_claim=sha)
+        self.assertEqual(report["commit_claim"]["status"], "rejected")
+        self.assertFalse(report["commit_claim"]["certification"])
+
+    def test_skip_worktree_rejects_commit_claim(self):
+        if shutil.which("git") is None:
+            self.skipTest("git unavailable")
+        self.make("a.rs", "fn safe() {}\n")
+        self._commit_head()
+        sha = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("update-index", "--skip-worktree", "a.rs")
+        self.make("a.rs", "fn safe() { /* skipped */ }\n")
+        report = scan(self.root, customer_id="acme", commit_claim=sha)
+        self.assertEqual(report["commit_claim"]["status"], "rejected")
+        self.assertFalse(report["commit_claim"]["certification"])
+
+    def test_sparse_checkout_flag_rejects_commit_claim(self):
+        if shutil.which("git") is None:
+            self.skipTest("git unavailable")
+        self.make("a.rs", "fn safe() {}\n")
+        self._commit_head()
+        sha = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("config", "core.sparseCheckout", "true")
+        report = scan(self.root, customer_id="acme", commit_claim=sha)
+        self.assertEqual(report["commit_claim"]["status"], "rejected")
+        self.assertFalse(report["commit_claim"]["verified"])
+        self.assertFalse(report["commit_claim"]["certification"])
+
     def test_cli_rejects_mismatched_customer_and_does_not_write_report(self):
         self.make("a.rs", "fn safe() {}\n")
         auth = self.root / "auth.json"
@@ -214,6 +332,13 @@ class AuthorizationTests(unittest.TestCase):
             code = main()
         self.assertEqual(code, 2)
         self.assertFalse(output.exists())
+
+    def _commit_head(self):
+        self.git("init", "-b", "main")
+        self.git("config", "core.autocrlf", "false")
+        self.git("add", "-A")
+        self.git("-c", "user.email=wolf-auditor@example.com", "-c", "user.name=WOLF AUDITOR Test",
+                 "commit", "-m", "test")
 
     def git(self, *args):
         env = os.environ.copy()
