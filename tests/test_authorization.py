@@ -175,6 +175,28 @@ class AuthorizationTests(unittest.TestCase):
         self.assertFalse(report["commit_claim"]["certification"])
         self.assertEqual(report["status"], "INCOMPLETE")
 
+    def test_repository_fsmonitor_is_not_executed(self):
+        if shutil.which("git") is None:
+            self.skipTest("git unavailable")
+        self.make("a.py", "print('ok')\n")
+        self._commit_head()
+        sha = self.git("rev-parse", "HEAD").stdout.strip()
+        marker = Path(self.outside.name) / "fsmonitor-marker"
+        if os.name == "nt":
+            script = Path(self.outside.name) / "fsmon.cmd"
+            script.write_text(f'@echo pwned> "{marker}"\r\n', encoding="utf-8")
+            command = str(script)
+        else:
+            script = Path(self.outside.name) / "fsmon.sh"
+            script.write_text("#!/bin/sh\ntouch " + str(marker) + "\nexit 0\n", encoding="utf-8")
+            script.chmod(0o755)
+            command = str(script)
+        self.git("config", "core.fsmonitor", command)
+        report = scan(self.root, customer_id="acme", commit_claim=sha)
+        self.assertFalse(marker.exists())
+        self.assertEqual(report["commit_claim"]["status"], "local_head_match")
+        self.assertFalse(report["commit_claim"]["certification"])
+
     def test_clean_local_head_matches_without_certification(self):
         if shutil.which("git") is None:
             self.skipTest("git unavailable")

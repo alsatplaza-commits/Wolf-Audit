@@ -402,10 +402,26 @@ def _index_hides_changes(listing: str) -> bool:
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run git without executing commands configured by the repository.
+
+    A scan target is untrusted. core.fsmonitor and hooks in its config must
+    not run while a commit claim is checked.
+    """
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
+    locked = (
+        "core.fsmonitor=",
+        f"core.hooksPath={os.devnull}",
+        "diff.external=",
+        "credential.helper=",
+        "protocol.file.allow=never",
+        "protocol.ext.allow=never",
+    )
+    config: list[str] = []
+    for item in locked:
+        config.extend(("-c", item))
     return subprocess.run(
-        ["git", "-C", os.fspath(root), *args],
+        ["git", "-C", os.fspath(root), *config, *args],
         capture_output=True,
         text=True,
         timeout=10,
