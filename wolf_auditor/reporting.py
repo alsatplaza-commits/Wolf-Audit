@@ -44,6 +44,15 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                 "rules": [{"id": rule, "shortDescription": {"text": rule}} for rule in rules],
             }},
             "originalUriBaseIds": {"%SRCROOT%": {"uri": "file:///"}},
+            "artifacts": [
+                {
+                    "location": {"uri": item["path"].replace("\\", "/"), "uriBaseId": "%SRCROOT%"},
+                    "hashes": {"sha-256": item["sha256"]},
+                }
+                for item in sorted(report.get("file_manifest", []), key=lambda item: item["path"])
+                if isinstance(item, dict) and isinstance(item.get("path"), str)
+                and isinstance(item.get("sha256"), str)
+            ],
             "results": results,
             "properties": {
                 "audit_status": report["status"],
