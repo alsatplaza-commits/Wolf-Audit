@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from wolf_auditor.authorization import has_reparse_attribute, load_customer_authorization
+from wolf_auditor.delta import _hash, compare_reports
 from wolf_auditor.engine import scan
 from wolf_auditor.__main__ import main
 
@@ -368,6 +369,76 @@ class AuthorizationTests(unittest.TestCase):
             code = main()
         self.assertEqual(code, 2)
         self.assertFalse(output.exists())
+
+    def test_delta_rejects_same_directory_name_across_customers(self):
+        secret = "CROSS_TENANT_SECRET_123456"
+        acme = self.root / "app"
+        beta = self.root / "other" / "app"
+        self.make("danger.py", f'api_key = "{secret}"\n', root=acme)
+        self.make("ok.py", "print('ok')\n", root=beta)
+        previous = scan(acme, customer_id="acme")
+        current = scan(beta, customer_id="beta")
+        self.assertEqual(previous["target_directory_name"], current["target_directory_name"])
+        self.assertEqual(previous["customer_scope"]["customer_id"], "acme")
+        self.assertEqual(current["customer_scope"]["customer_id"], "beta")
+        self.assertIn("POTENTIAL_HARDCODED_SECRET", [item["rule"] for item in previous["findings"]])
+        with self.assertRaisesRegex(ValueError, "cannot compare reports from different customers"):
+            compare_reports(previous, current)
+        self.assertNotIn(secret, json.dumps(current))
+
+    def test_delta_rejects_bound_report_against_unbound_report(self):
+        self.make("app/ok.py", "print('ok')\n")
+        bound = scan(self.root / "app", customer_id="acme")
+        unbound = scan(self.root / "app")
+        self.assertEqual(bound["target_directory_name"], unbound["target_directory_name"])
+        self.assertFalse(unbound["customer_scope"]["bound"])
+        with self.assertRaisesRegex(ValueError, "cannot compare reports from different customers"):
+            compare_reports(bound, unbound)
+
+    def test_delta_same_customer_same_directory_still_compares(self):
+        app = self.root / "app"
+        self.make("ok.py", "print('ok')\n", root=app)
+        previous = scan(app, customer_id="acme")
+        self.make("bad.py", "eval('something')\n", root=app)
+        current = scan(app, customer_id="acme")
+        delta = compare_reports(previous, current)
+        self.assertEqual(len(delta["new_findings"]), 1)
+        self.assertEqual(delta["resolved_findings"], [])
+        self.assertEqual(previous["customer_scope"]["customer_id"], "acme")
+
+    def test_delta_bound_scope_without_customer_id_is_rejected(self):
+        self.make("app/ok.py", "print('ok')\n")
+        previous = scan(self.root / "app", customer_id="acme")
+        current = scan(self.root / "app", customer_id="acme")
+        broken = json.loads(json.dumps(current))
+        del broken["customer_scope"]["customer_id"]
+        broken["report_sha256"] = _hash({k: v for k, v in broken.items() if k != "report_sha256"})
+        with self.assertRaisesRegex(ValueError, "cannot compare reports from different customers"):
+            compare_reports(previous, broken)
+
+    def test_cli_cross_customer_delta_is_not_written(self):
+        secret = "CROSS_TENANT_SECRET_123456"
+        acme = self.root / "acme" / "app"
+        beta = self.root / "beta" / "app"
+        self.make("danger.py", f'api_key = "{secret}"\n', root=acme)
+        self.make("ok.py", "print('ok')\n", root=beta)
+        baseline = self.root / "baseline.json"
+        baseline.write_text(json.dumps(scan(acme, customer_id="acme")), encoding="utf-8")
+        output = self.root / "out" / "report.json"
+        delta_path = self.root / "out" / "delta.json"
+        args = [
+            "wolf-auditor", str(beta), "--customer-id", "beta",
+            "--baseline", str(baseline), "--output", str(output),
+            "--delta-output", str(delta_path),
+        ]
+        stderr = StringIO()
+        with patch("sys.argv", args), redirect_stdout(StringIO()), redirect_stderr(stderr):
+            code = main()
+        self.assertEqual(code, 2)
+        self.assertIn("cannot compare reports from different customers", stderr.getvalue())
+        self.assertFalse(output.exists())
+        self.assertFalse(delta_path.exists())
+        self.assertNotIn(secret, stderr.getvalue())
 
     def _commit_head(self):
         self.git("init", "-b", "main")

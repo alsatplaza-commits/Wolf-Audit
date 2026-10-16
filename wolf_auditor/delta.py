@@ -31,11 +31,28 @@ def finding_key(f: dict[str, Any]) -> str:
         raise ValueError("malformed finding identity")
     return _hash(list(fields))
 
+def _bound_customer(report: dict[str, Any]) -> str | None:
+    """Return the bound customer id, or None when the report is unbound.
+
+    Old reports without customer_scope are unbound. A bound flag without a
+    customer id fails closed so two incomplete scopes cannot be treated as equal.
+    """
+    scope = report.get("customer_scope")
+    if not isinstance(scope, dict) or scope.get("bound") is not True:
+        return None
+    customer = scope.get("customer_id")
+    if not isinstance(customer, str) or not customer:
+        raise ValueError("cannot compare reports from different customers")
+    return customer
+
+
 def compare_reports(previous: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
     if not verify_report(previous) or not verify_report(current):
         raise ValueError("invalid or hash-mismatched evidence; comparison refused")
     if previous.get("target_directory_name") != current.get("target_directory_name"):
         raise ValueError("cannot compare reports from different targets")
+    if _bound_customer(previous) != _bound_customer(current):
+        raise ValueError("cannot compare reports from different customers")
     before = {finding_key(f) for f in previous.get("findings", [])}
     after = {finding_key(f) for f in current.get("findings", [])}
     changed = {
