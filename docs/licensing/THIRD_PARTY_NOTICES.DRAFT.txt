@@ -1,0 +1,25 @@
+THIS FILE IS NOT IN FORCE.
+It is an inventory of what was checked. It is not a clearance.
+
+No third-party source tree is vendored inside the public engine.
+No copyright notice was found in the engine sources by the scan recorded
+in docs/LICENSE_TECHNICAL_AUDIT.md.
+
+Checked metadata, not vendored code:
+
+- setuptools, PyPI release 84.0.0, metadata field license_expression: MIT.
+  The setuptools source was not copied into this repository and was not
+  read line by line. Future releases were not reviewed.
+- actions/checkout, GitHub repository license metadata: MIT.
+  Pinned in .github/workflows/ci.yml at 11bd71901bbe5b1630ceea73d27597364c9af683.
+  The action source was not copied into this repository.
+- actions/upload-artifact, GitHub repository license metadata: MIT.
+  Pinned in .github/workflows/ci.yml at ea165f8d65b6e75b540449e92b4886f43607fa02.
+  The action source was not copied into this repository.
+
+Wolf-Music APK files exist on the branch wolf-music-downloads. They are not
+part of the main branch file list. Their copyright holder is UNKNOWN.
+They are not covered by this draft.
+
+A metadata license name is not a finding that the code matches that license.
+No result in this file is a legal conclusion.

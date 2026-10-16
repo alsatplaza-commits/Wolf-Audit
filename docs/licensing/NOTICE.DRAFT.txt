@@ -1,0 +1,16 @@
+THIS NOTICE IS NOT IN FORCE.
+DO NOT TREAT IT AS A COPYRIGHT NOTICE OR A LICENSE GRANT.
+
+Project: Wolf-Audit public scanning engine
+Copyright holder: UNKNOWN
+Licensing authority: UNKNOWN
+Patent position: UNKNOWN
+Trademark position: UNKNOWN
+
+Apache License 2.0 has not been granted for this repository.
+A software license would not transfer trademark or logo rights.
+Brand names used by the project are not licensed by this draft.
+
+Required before any grant: a named holder and written authority to license.
+The holder name, a year, and a patent statement are intentionally omitted
+because those facts were not established from repository evidence.
