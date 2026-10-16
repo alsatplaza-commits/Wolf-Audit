@@ -4,6 +4,7 @@ A schema match is not a security certification and not a vulnerability proof.
 """
 import hashlib
 import json
+import subprocess
 import unittest
 from importlib.metadata import version
 from pathlib import Path
@@ -27,8 +28,15 @@ CDX_SCHEMA_URL = (
 )
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _committed_blob(relative: str) -> bytes:
+    """Read the git blob. A Windows checkout may rewrite CRLF in the worktree."""
+    return subprocess.check_output(
+        ["git", "-C", str(ROOT), "-c", "core.autocrlf=false", "cat-file", "blob", f"HEAD:{relative}"],
+    )
 
 
 def _validator(schema: dict):
@@ -152,7 +160,7 @@ class P1CompletionTests(unittest.TestCase):
         self.assertEqual(finding["line"], 2)
         self.assertEqual(finding["rule"], "PY_OS_SYSTEM")
         self.assertGreaterEqual(finding["line"], 1)
-        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        digest = _sha256((self.root / finding["path"]).read_bytes())
         self.assertEqual(manifest[finding["path"]], digest)
         sarif = to_sarif(report)
         artifact = sarif["runs"][0]["artifacts"][0]
@@ -181,10 +189,14 @@ class P1CompletionTests(unittest.TestCase):
         self.assertEqual(version("jsonschema"), "4.23.0")
         sarif_path = SCHEMA_DIR / "sarif-schema-2.1.0.json"
         cdx_path = SCHEMA_DIR / "bom-1.6.schema.json"
-        self.assertEqual(_sha256(sarif_path), SARIF_SCHEMA_SHA256)
-        self.assertEqual(_sha256(cdx_path), CDX_SCHEMA_SHA256)
-        sarif_schema = json.loads(sarif_path.read_text(encoding="utf-8"))
-        cdx_schema = json.loads(cdx_path.read_text(encoding="utf-8"))
+        sarif_blob = _committed_blob("tests/fixtures/schemas/sarif-schema-2.1.0.json")
+        cdx_blob = _committed_blob("tests/fixtures/schemas/bom-1.6.schema.json")
+        self.assertEqual(_sha256(sarif_blob), SARIF_SCHEMA_SHA256)
+        self.assertEqual(_sha256(cdx_blob), CDX_SCHEMA_SHA256)
+        self.assertTrue(sarif_path.is_file())
+        self.assertTrue(cdx_path.is_file())
+        sarif_schema = json.loads(sarif_blob.decode("utf-8"))
+        cdx_schema = json.loads(cdx_blob.decode("utf-8"))
         self.put("a.py", "import os\nos.system('x')\n")
         self.put("broken.py", "def (:\n")
         self.put("Cargo.lock", 'version = 3\n[[package]]\nname = "serde"\nversion = "1.0.1"\n')
@@ -205,8 +217,8 @@ class P1CompletionTests(unittest.TestCase):
         self.assertTrue(CDX_SCHEMA_URL.endswith("bom-1.6.schema.json"))
 
     def test_wrong_schema_version_is_rejected(self):
-        sarif_schema = json.loads((SCHEMA_DIR / "sarif-schema-2.1.0.json").read_text(encoding="utf-8"))
-        cdx_schema = json.loads((SCHEMA_DIR / "bom-1.6.schema.json").read_text(encoding="utf-8"))
+        sarif_schema = json.loads(_committed_blob("tests/fixtures/schemas/sarif-schema-2.1.0.json").decode("utf-8"))
+        cdx_schema = json.loads(_committed_blob("tests/fixtures/schemas/bom-1.6.schema.json").decode("utf-8"))
         self.put("a.py", "x = 1\n")
         report = scan(self.root)
         sarif = to_sarif(report)
