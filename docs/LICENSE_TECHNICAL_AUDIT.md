@@ -47,6 +47,8 @@ Not included:
 | reuse, licensee, fossology, askalono, nomos | Not on `PATH`. Not run. No results from them. |
 | curl | Fetched the official license and the SPDX and PyPI JSON records below. |
 | GitHub API | `repos/actions/checkout/license` and `repos/actions/upload-artifact/license`. |
+| Python used for the local suite | 3.12.3 (`python3 --version` in this worktree). CI installs `python` 3.11 or newer. |
+| Git used for the blob hash | 2.43.0 locally. The test calls `git cat-file blob`, which reads the stored object. |
 
 ScanCode command, from the main worktree, after the official text file existed but excluding it:
 
@@ -169,20 +171,23 @@ PR #4 paths that are not on main. They are not in this branch's tree. Author is 
 - `docs/licensing/NOTICE.DRAFT.txt`
 - `docs/licensing/THIRD_PARTY_NOTICES.DRAFT.txt`
 - `tests/test_license_posture.py`
+- `.gitattributes` with `docs/licensing/APACHE-2.0.OFFICIAL.txt text eol=lf`
 
 Not added: root `LICENSE`, in-force NOTICE, SPDX grant, Enterprise code, scanner behavior changes.
 
 ## Tests
 
-Command:
+Command in this worktree, Python 3.12.3:
 
 ```text
 python3 -m unittest discover -s tests -v
 ```
 
-The numeric result is recorded in the pull request after the command is run in this worktree. The new tests assert:
+Result before the line-ending fix was committed: 64 tests, exit code 0. That count is this branch only. It is not the 102-test count of PR #4, which is a different tree.
 
-- official file hash
+The license tests assert:
+
+- stored official blob hash equals `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`
 - a one-byte change does not match
 - root license grant absent
 - no SPDX grant in `wolf_auditor/*.py`
@@ -192,7 +197,20 @@ The numeric result is recorded in the pull request after the command is run in t
 - `MIT` -> METADATA_ONLY
 - `scan()` still returns `wolf-auditor.evidence.v1` and has no `license_grant`
 
-Ubuntu and Windows Actions URLs: not claimed until the run for this commit finishes. See the pull request description.
+The hash is taken from `git cat-file blob HEAD:docs/licensing/APACHE-2.0.OFFICIAL.txt` with `core.autocrlf=false`. The worktree file is not the hashed object, because a Windows checkout can rewrite LF to CRLF.
+
+### Actions evidence for commit e570e03
+
+Commit `e570e03e2396c8205999350fa0c9258aead2b32b` hashed the worktree file. GitHub Actions conclusions:
+
+| Run | Event | ubuntu-latest | windows-latest |
+| --- | --- | --- | --- |
+| https://github.com/alsatplaza-commits/Wolf-Audit/actions/runs/38934145338 | push | success, job https://github.com/alsatplaza-commits/Wolf-Audit/actions/runs/38934145338/job/117085257065 | failure, job https://github.com/alsatplaza-commits/Wolf-Audit/actions/runs/38934145338/job/117085256615 |
+| https://github.com/alsatplaza-commits/Wolf-Audit/actions/runs/38934178278 | pull_request | success, job https://github.com/alsatplaza-commits/Wolf-Audit/actions/runs/38934178278/job/117085368255 | failure, job https://github.com/alsatplaza-commits/Wolf-Audit/actions/runs/38934178278/job/117085367871 |
+
+Windows assertion on that commit: worktree SHA-256 `3ddf9be5c28fe27dad143a5dc76eea25222ad1dd68934a047064e56ed2fa40c5` was not the official hash. The self-audit step was skipped after the unit-test step failed. Ubuntu on the same commits completed both the unit tests and the self-audit.
+
+The following commit changes the hash source to the git blob and sets `eol=lf` on the official text file. Actions URLs for that commit are not written in this paragraph until both operating systems finish. A reviewer must read the pull request description and the later Actions runs, then confirm both jobs.
 
 ## Blockers
 
@@ -210,6 +228,6 @@ Ubuntu and Windows Actions URLs: not claimed until the run for this commit finis
 
 - PR head SHA equals the commit the reviewer read.
 - Root `LICENSE` still absent on that SHA.
-- `tests/test_license_posture.py` result on both ubuntu-latest and windows-latest.
+- `tests/test_license_posture.py` result on both ubuntu-latest and windows-latest for the commit that hashes the git blob. The e570e03 Windows jobs failed and are not evidence for the fix.
 - PR #4 and PR #5 heads unchanged: `e4d74128b0f93c86cc2fafa2d0781690957fb7b7` and `63716997589cb7caafcb0389f9bbd0584639a18a`.
 - main still `d5ffd6111ae5b495bc713b57b40ceba0266c2b08` until a human merge, which this work does not do.

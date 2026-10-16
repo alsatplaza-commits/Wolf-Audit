@@ -1,6 +1,7 @@
 """License posture checks. These results are not a legal clearance."""
 
 import hashlib
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,8 +14,24 @@ OFFICIAL_SHA256 = "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523
 FORBIDDEN_CLAIMS = ("PASS", "REVIEWED", "VERIFIED")
 
 
-def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def committed_official_bytes() -> bytes:
+    """Return the stored git blob. Checkout may rewrite CRLF in the worktree."""
+    return subprocess.check_output(
+        [
+            "git",
+            "-C",
+            str(ROOT),
+            "-c",
+            "core.autocrlf=false",
+            "cat-file",
+            "blob",
+            "HEAD:docs/licensing/APACHE-2.0.OFFICIAL.txt",
+        ],
+    )
 
 
 def dependency_signal(license_id: str) -> str:
@@ -31,14 +48,15 @@ def dependency_signal(license_id: str) -> str:
 class LicensePostureTests(unittest.TestCase):
     def test_official_apache_text_matches_published_bytes(self):
         self.assertTrue(OFFICIAL.is_file())
-        self.assertEqual(sha256(OFFICIAL), OFFICIAL_SHA256)
-        text = OFFICIAL.read_text(encoding="utf-8")
+        blob = committed_official_bytes()
+        self.assertEqual(sha256(blob), OFFICIAL_SHA256)
+        text = blob.decode("utf-8")
         self.assertIn("Apache License", text)
         self.assertIn("Version 2.0, January 2004", text)
         self.assertNotIn("Copyright holder:", text)
 
     def test_wrong_license_bytes_do_not_match(self):
-        altered = bytearray(OFFICIAL.read_bytes())
+        altered = bytearray(committed_official_bytes())
         altered[-2] = (altered[-2] + 1) % 256
         self.assertNotEqual(hashlib.sha256(altered).hexdigest(), OFFICIAL_SHA256)
 
