@@ -253,6 +253,16 @@ class SecurityV03Tests(unittest.TestCase):
         self.assertIn("GITHUB_TOKEN_LIKE_STRING", [f["rule"] for f in report["findings"]])
         self.assertNotIn(secret, json.dumps(report))
 
+    def test_signed_url_query_is_flagged_and_not_copied(self):
+        signature = "SYNTHETIC" + ("A" * 24)
+        self.make("fetch.yml", 'DOWNLOAD: "https://example.invalid/file?se=2020-01-01&sig=' + signature + '"\n')
+        report = scan(self.root)
+        self.assertIn("CREDENTIAL_URL_QUERY", [item["rule"] for item in report["findings"]])
+        encoded = json.dumps(report)
+        self.assertNotIn(signature, encoded)
+        self.assertNotIn("sig=", encoded)
+        self.assertNotIn("example.invalid", encoded)
+
     def test_ignored_generated_paths_have_explicit_inventory(self):
         self.make("node_modules/vendor/evil.py", 'eval("danger")\n')
         report = scan(self.root)

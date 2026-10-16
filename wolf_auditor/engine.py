@@ -35,6 +35,9 @@ SECRET_PATTERN = re.compile(
 )
 PRIVATE_KEY_PATTERN = re.compile(r"-----BEGIN (?:OPENSSH|RSA|EC|DSA|ENCRYPTED)?\s*PRIVATE KEY-----")
 GITHUB_TOKEN_PATTERN = re.compile(r"\b(?:ghp_|gho_|ghu_|ghs_|ghr_)[A-Za-z0-9_]{30,}|\bgithub_pat_[A-Za-z0-9_]{40,}")
+CREDENTIAL_URL_PATTERN = re.compile(
+    r"(?i)[?&](?:sig|x-amz-signature|x-goog-signature|signature)=[A-Za-z0-9%._~+/-]{16,}"
+)
 USES_PATTERN = re.compile(r"^\s*-\s*uses\s*:\s*([^\s#]+)")
 PINNED_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 
@@ -152,6 +155,8 @@ def scan(
                     matched_rules.append(("PRIVATE_KEY_MATERIAL", "high"))
                 if GITHUB_TOKEN_PATTERN.search(line):
                     matched_rules.append(("GITHUB_TOKEN_LIKE_STRING", "high"))
+                if CREDENTIAL_URL_PATTERN.search(line):
+                    matched_rules.append(("CREDENTIAL_URL_QUERY", "high"))
                 for rule, severity in matched_rules:
                     # Never expose the matching line or secret value in the report.
                     findings.append({

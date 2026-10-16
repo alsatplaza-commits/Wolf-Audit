@@ -15,3 +15,4 @@
 - A scan bound to one authorized customer is a local scope limit, not a security certification. Scans refuse symlink roots, symlink targets, reparse points, and hard links that also exist outside the scan root. They refuse commit claims that are not the clean local HEAD. Ignored files, assume-unchanged or skip-worktree entries, and sparse checkout also reject the claim.
 - Evidence outputs from a bound scan must stay inside that customer directory. Symlink and junction output, policy, and baseline paths are not followed. Duplicate customer ids in an authorization file are rejected.
 - Evidence SHA-256 detects accidental alteration but does not attest provenance without a separately trusted signature.
+- Do not commit signed object URLs or query credentials. A workflow history entry on `wolf-music-downloads` already contains one; its value is intentionally not copied here. New scans flag that URL shape and omit the matched text.
