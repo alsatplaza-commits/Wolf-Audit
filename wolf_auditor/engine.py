@@ -6,10 +6,21 @@ import hashlib
 import json
 import os
 import re
+import stat
 from pathlib import Path
 from typing import Any
 
 from .analysis import docker_sast, python_sast, workflow_sast
+from .authorization import (
+    FileTooLarge,
+    OutsideHardlink,
+    RejectedSymlink,
+    assess_commit_claim,
+    confine_target,
+    inode_name_counts,
+    is_unfollowed_link,
+    read_regular_file,
+)
 from .iac import is_kubernetes_manifest, kubernetes_sast, terraform_sast
 from .supply_chain import inventory, is_manifest
 
@@ -24,6 +35,9 @@ SECRET_PATTERN = re.compile(
 )
 PRIVATE_KEY_PATTERN = re.compile(r"-----BEGIN (?:OPENSSH|RSA|EC|DSA|ENCRYPTED)?\s*PRIVATE KEY-----")
 GITHUB_TOKEN_PATTERN = re.compile(r"\b(?:ghp_|gho_|ghu_|ghs_|ghr_)[A-Za-z0-9_]{30,}|\bgithub_pat_[A-Za-z0-9_]{40,}")
+CREDENTIAL_URL_PATTERN = re.compile(
+    r"(?i)[?&](?:sig|x-amz-signature|x-goog-signature|signature)=[A-Za-z0-9%._~+/-]{16,}"
+)
 USES_PATTERN = re.compile(r"^\s*-\s*uses\s*:\s*([^\s#]+)")
 PINNED_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 
@@ -32,10 +46,15 @@ def _sha256(blob: bytes) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
-def scan(root: Path) -> dict[str, Any]:
-    root = root.expanduser().resolve(strict=True)
-    if not root.is_dir():
-        raise ValueError("target must be an existing directory")
+def scan(
+    root: Path,
+    *,
+    customer_id: str | None = None,
+    authorized_root: Path | None = None,
+    commit_claim: str | None = None,
+) -> dict[str, Any]:
+    root, _boundary, scope = confine_target(root, authorized_root, customer_id)
+    inside_links = inode_name_counts(root)
     findings: list[dict[str, Any]] = []
     gaps: list[dict[str, str]] = []
     manifest: list[dict[str, str]] = []
@@ -50,17 +69,22 @@ def scan(root: Path) -> dict[str, Any]:
     for directory, dirnames, filenames in os.walk(root, topdown=True, followlinks=False, onerror=walk_error):
         for directory_name in dirnames:
             candidate = Path(directory) / directory_name
-            if candidate.is_symlink():
+            if is_unfollowed_link(candidate):
+                relative_dir = candidate.relative_to(root).as_posix()
                 gaps.append({
-                    "path": candidate.relative_to(root).as_posix(),
+                    "path": relative_dir,
                     "reason": "directory_symlink_not_followed",
+                })
+                gaps.append({
+                    "path": relative_dir,
+                    "reason": "symlink_target_rejected",
                 })
         for ignored in sorted(d for d in dirnames if d in SKIP_DIRS):
             excluded.append({"path": (Path(directory) / ignored).relative_to(root).as_posix(),
                              "reason": "excluded_generated_or_repository_metadata"})
         dirnames[:] = sorted(
             d for d in dirnames
-            if d not in SKIP_DIRS and not (Path(directory) / d).is_symlink()
+            if d not in SKIP_DIRS and not is_unfollowed_link(Path(directory) / d)
         )
         for name in sorted(filenames):
             file = Path(directory) / name
@@ -75,22 +99,38 @@ def scan(root: Path) -> dict[str, Any]:
                 or file.suffix.lower() in {".tf", ".tfvars"}
             ):
                 continue
-            if file.is_symlink():
+            if is_unfollowed_link(file):
                 gaps.append({"path": relative, "reason": "symlink_not_followed"})
+                gaps.append({"path": relative, "reason": "symlink_target_rejected"})
+                continue
+            try:
+                file_info = file.lstat()
+            except OSError as error:
+                gaps.append({"path": relative, "reason": type(error).__name__})
+                continue
+            inside = inside_links.get((file_info.st_dev, file_info.st_ino), 0)
+            if stat.S_ISREG(file_info.st_mode) and file_info.st_nlink > 1 and (
+                file_info.st_ino == 0 or file_info.st_nlink > inside
+            ):
+                gaps.append({"path": relative, "reason": "hardlink_outside_root_rejected"})
                 continue
             if scanned >= MAX_FILES:
                 gaps.append({"path": relative, "reason": "scan_file_budget_exceeded"})
                 stopped = True
                 break
             try:
-                if file.stat().st_size > MAX_FILE_BYTES:
-                    gaps.append({"path": relative, "reason": "file_size_limit"})
-                    continue
-                blob = file.read_bytes()
-                if len(blob) > MAX_FILE_BYTES:
-                    gaps.append({"path": relative, "reason": "file_size_limit"})
-                    continue
+                blob = read_regular_file(file, MAX_FILE_BYTES, max_nlink=inside or None)
                 content = blob.decode("utf-8")
+            except FileTooLarge:
+                gaps.append({"path": relative, "reason": "file_size_limit"})
+                continue
+            except OutsideHardlink:
+                gaps.append({"path": relative, "reason": "hardlink_outside_root_rejected"})
+                continue
+            except RejectedSymlink:
+                gaps.append({"path": relative, "reason": "symlink_not_followed"})
+                gaps.append({"path": relative, "reason": "symlink_target_rejected"})
+                continue
             except (OSError, UnicodeError) as error:
                 gaps.append({"path": relative, "reason": type(error).__name__})
                 continue
@@ -115,6 +155,8 @@ def scan(root: Path) -> dict[str, Any]:
                     matched_rules.append(("PRIVATE_KEY_MATERIAL", "high"))
                 if GITHUB_TOKEN_PATTERN.search(line):
                     matched_rules.append(("GITHUB_TOKEN_LIKE_STRING", "high"))
+                if CREDENTIAL_URL_PATTERN.search(line):
+                    matched_rules.append(("CREDENTIAL_URL_QUERY", "high"))
                 for rule, severity in matched_rules:
                     # Never expose the matching line or secret value in the report.
                     findings.append({
@@ -145,6 +187,10 @@ def scan(root: Path) -> dict[str, Any]:
         if stopped:
             break
 
+    commit_record, commit_rejected = assess_commit_claim(root, commit_claim)
+    if commit_rejected:
+        gaps.append({"path": "<commit>", "reason": "unverified_commit_claim_rejected"})
+
     findings.sort(key=lambda f: (f["path"], f["line"], f["rule"]))
     gaps.sort(key=lambda g: (g["path"], g["reason"]))
     excluded.sort(key=lambda g: (g["path"], g["reason"]))
@@ -153,6 +199,8 @@ def scan(root: Path) -> dict[str, Any]:
         "schema": "wolf-auditor.evidence.v1",
         "version": VERSION,
         "scope": "read_only_heuristic_source_scan",
+        "customer_scope": scope,
+        "commit_claim": commit_record,
         "target_directory_name": root.name,
         "scanned_files": scanned,
         "file_manifest": manifest,
