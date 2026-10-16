@@ -51,7 +51,7 @@ Bugün iki sınır vardır:
 
 Çözülen: inceleme yapıldı, resmi metin saklandı, yanlışlıkla lisans yayımlanması test ile engellendi, APK’ların Core listesinde olmadığı gösterildi.
 
-İlk GitHub denemesinde Ubuntu testi geçti, Windows testi geçmedi. Nedeni lisansın hukuken geçersiz olması değil. Windows, dosyayı diske yazarken satır sonlarını değiştirdi ve dosyanın parmak izi (SHA-256) resmi kopyayla eşleşmedi. Düzeltme, parmak izini diskteki kopyadan değil, Git’in sakladığı orijinal baytlardan alır. Bu düzeltmenin iki işletim sisteminde de bittiği, ancak Actions kaydı yeşil olduktan sonra söylenebilir.
+İlk GitHub denemesinde Ubuntu testi geçti, Windows testi geçmedi. Nedeni lisansın hukuken geçersiz olması değil. Windows, dosyayı diske yazarken satır sonlarını değiştirdi ve dosyanın parmak izi (SHA-256) resmi kopyayla eşleşmedi. Düzeltme, parmak izini diskteki kopyadan değil, Git’in sakladığı orijinal baytlardan alır. Bu düzeltmenin commit’i `4b7c05f3db759ed7b6ef42f70eee634c31ba9cce` için Ubuntu ve Windows kayıtları ikisi de tamamlandı. Bu, testlerin çalıştığı anlamına gelir. Lisansın yürürlüğe girdiği anlamına gelmez.
 
 Bekleyen: hak sahibi adı, lisanslama yetkisi, patent bilgisi, marka bilgisi, PR #4’teki ajan katkısının sizin kontrolünüzde olduğuna dair belge, APK dalının kaderi.
 

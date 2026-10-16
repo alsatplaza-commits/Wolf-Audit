@@ -210,7 +210,18 @@ Commit `e570e03e2396c8205999350fa0c9258aead2b32b` hashed the worktree file. GitH
 
 Windows assertion on that commit: worktree SHA-256 `3ddf9be5c28fe27dad143a5dc76eea25222ad1dd68934a047064e56ed2fa40c5` was not the official hash. The self-audit step was skipped after the unit-test step failed. Ubuntu on the same commits completed both the unit tests and the self-audit.
 
-The following commit changes the hash source to the git blob and sets `eol=lf` on the official text file. Actions URLs for that commit are not written in this paragraph until both operating systems finish. A reviewer must read the pull request description and the later Actions runs, then confirm both jobs.
+### Actions evidence for the blob-hash fix
+
+Commit `4b7c05f3db759ed7b6ef42f70eee634c31ba9cce` reads the git blob and adds `.gitattributes`. Pull request: https://github.com/alsatplaza-commits/Wolf-Audit/pull/6
+
+| Run | Event | ubuntu-latest | windows-latest |
+| --- | --- | --- | --- |
+| https://github.com/alsatplaza-commits/Wolf-Audit/actions/runs/38934535950 | push | success, job https://github.com/alsatplaza-commits/Wolf-Audit/actions/runs/38934535950/job/117086572064 | success, job https://github.com/alsatplaza-commits/Wolf-Audit/actions/runs/38934535950/job/117086571905 |
+| https://github.com/alsatplaza-commits/Wolf-Audit/actions/runs/38934546498 | pull_request | success, job https://github.com/alsatplaza-commits/Wolf-Audit/actions/runs/38934546498/job/117086609228 | success, job https://github.com/alsatplaza-commits/Wolf-Audit/actions/runs/38934546498/job/117086609644 |
+
+On both runs, the unit-test step and the self-audit step finished with GitHub conclusion `success` for ubuntu-latest and windows-latest. That conclusion means the executed checks completed. It is not a copyright clearance.
+
+The commit that adds this Actions table is the child of `4b7c05f3db759ed7b6ef42f70eee634c31ba9cce`. It does not change the hash test. Its own Actions URLs belong in the pull request description after those jobs finish. A reviewer must match the pull request head SHA to the blob they are reading.
 
 ## Blockers
 
@@ -228,6 +239,6 @@ The following commit changes the hash source to the git blob and sets `eol=lf` o
 
 - PR head SHA equals the commit the reviewer read.
 - Root `LICENSE` still absent on that SHA.
-- `tests/test_license_posture.py` result on both ubuntu-latest and windows-latest for the commit that hashes the git blob. The e570e03 Windows jobs failed and are not evidence for the fix.
+- `tests/test_license_posture.py` result on both ubuntu-latest and windows-latest for the pull request head, including the documentation commit that records the `4b7c05f` Actions URLs. The e570e03 Windows jobs failed and are not evidence for the fix.
 - PR #4 and PR #5 heads unchanged: `e4d74128b0f93c86cc2fafa2d0781690957fb7b7` and `63716997589cb7caafcb0389f9bbd0584639a18a`.
 - main still `d5ffd6111ae5b495bc713b57b40ceba0266c2b08` until a human merge, which this work does not do.
