@@ -21,5 +21,6 @@
 **PRESERVE WORKING SYSTEMS. NO REFACTOR WITHOUT DEFECT. MINIMUM SAFE CHANGE.** Never mark a blocked security review as independently approved based solely on self-generated tests.
 
 - P1.5 (implemented prototype): Optional bounded OSV querybatch, fail-closed advisory handling, strict JSON release policies, Kubernetes/Terraform heuristics, .env/token/PEM indicators, deterministic report comparison, OSV/CycloneDX vulnerability references. All require explicit interpretation; neither OSV nor policy output independently certifies a product.
+- Local customer scope (implemented prototype): a scan may be bound to exactly one authorized customer directory. Symlink path components and symlink targets are rejected instead of followed. A commit id is recorded only when it is that directory's clean local HEAD. Binding, a clean tree, or a matching commit is not a security certification.
 - Network boundary: no package metadata leaves the machine unless `--osv-online` is provided; private scans must not use public CI artifacts.
 - Deliberately unsupported: DAST, native Windows fuzzing, memory exploit proof, broad taint/dataflow, signed reviewer attestation, full CVE completeness.

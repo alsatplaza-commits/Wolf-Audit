@@ -10,6 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from .analysis import docker_sast, python_sast, workflow_sast
+from .authorization import (
+    FileTooLarge,
+    RejectedSymlink,
+    assess_commit_claim,
+    confine_target,
+    read_regular_file,
+)
 from .iac import is_kubernetes_manifest, kubernetes_sast, terraform_sast
 from .supply_chain import inventory, is_manifest
 
@@ -32,10 +39,14 @@ def _sha256(blob: bytes) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
-def scan(root: Path) -> dict[str, Any]:
-    root = root.expanduser().resolve(strict=True)
-    if not root.is_dir():
-        raise ValueError("target must be an existing directory")
+def scan(
+    root: Path,
+    *,
+    customer_id: str | None = None,
+    authorized_root: Path | None = None,
+    commit_claim: str | None = None,
+) -> dict[str, Any]:
+    root, scope = confine_target(root, authorized_root, customer_id)
     findings: list[dict[str, Any]] = []
     gaps: list[dict[str, str]] = []
     manifest: list[dict[str, str]] = []
@@ -51,9 +62,14 @@ def scan(root: Path) -> dict[str, Any]:
         for directory_name in dirnames:
             candidate = Path(directory) / directory_name
             if candidate.is_symlink():
+                relative_dir = candidate.relative_to(root).as_posix()
                 gaps.append({
-                    "path": candidate.relative_to(root).as_posix(),
+                    "path": relative_dir,
                     "reason": "directory_symlink_not_followed",
+                })
+                gaps.append({
+                    "path": relative_dir,
+                    "reason": "symlink_target_rejected",
                 })
         for ignored in sorted(d for d in dirnames if d in SKIP_DIRS):
             excluded.append({"path": (Path(directory) / ignored).relative_to(root).as_posix(),
@@ -77,20 +93,22 @@ def scan(root: Path) -> dict[str, Any]:
                 continue
             if file.is_symlink():
                 gaps.append({"path": relative, "reason": "symlink_not_followed"})
+                gaps.append({"path": relative, "reason": "symlink_target_rejected"})
                 continue
             if scanned >= MAX_FILES:
                 gaps.append({"path": relative, "reason": "scan_file_budget_exceeded"})
                 stopped = True
                 break
             try:
-                if file.stat().st_size > MAX_FILE_BYTES:
-                    gaps.append({"path": relative, "reason": "file_size_limit"})
-                    continue
-                blob = file.read_bytes()
-                if len(blob) > MAX_FILE_BYTES:
-                    gaps.append({"path": relative, "reason": "file_size_limit"})
-                    continue
+                blob = read_regular_file(file, MAX_FILE_BYTES)
                 content = blob.decode("utf-8")
+            except FileTooLarge:
+                gaps.append({"path": relative, "reason": "file_size_limit"})
+                continue
+            except RejectedSymlink:
+                gaps.append({"path": relative, "reason": "symlink_not_followed"})
+                gaps.append({"path": relative, "reason": "symlink_target_rejected"})
+                continue
             except (OSError, UnicodeError) as error:
                 gaps.append({"path": relative, "reason": type(error).__name__})
                 continue
@@ -145,6 +163,10 @@ def scan(root: Path) -> dict[str, Any]:
         if stopped:
             break
 
+    commit_record, commit_rejected = assess_commit_claim(root, commit_claim)
+    if commit_rejected:
+        gaps.append({"path": "<commit>", "reason": "unverified_commit_claim_rejected"})
+
     findings.sort(key=lambda f: (f["path"], f["line"], f["rule"]))
     gaps.sort(key=lambda g: (g["path"], g["reason"]))
     excluded.sort(key=lambda g: (g["path"], g["reason"]))
@@ -153,6 +175,8 @@ def scan(root: Path) -> dict[str, Any]:
         "schema": "wolf-auditor.evidence.v1",
         "version": VERSION,
         "scope": "read_only_heuristic_source_scan",
+        "customer_scope": scope,
+        "commit_claim": commit_record,
         "target_directory_name": root.name,
         "scanned_files": scanned,
         "file_manifest": manifest,

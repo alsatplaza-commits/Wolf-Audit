@@ -12,4 +12,5 @@
 - `--osv-online` is an explicit opt-in external request. It discloses package names, versions and ecosystems to OSV; obtain permission before scanning confidential dependency inventories.
 - Keep private audit evidence, file hashes, SBOMs, vulnerability matches and gate reports off public branches and public CI artifacts.
 - Automated policy gate `PASS` never constitutes an independent FFI review or security certification.
+- A scan bound to one authorized customer is a local scope limit, not a security certification. Scans refuse symlink roots and symlink targets, and they refuse commit claims that are not the clean local HEAD.
 - Evidence SHA-256 detects accidental alteration but does not attest provenance without a separately trusted signature.

@@ -39,7 +39,11 @@ python -m wolf_auditor /path/to/authorized-project --osv-online --output osv-rep
 python -m wolf_auditor /path/to/authorized-project --policy policies/high-risk.json --gate-output gate.json --output report.json
 # Recheck against an earlier report:
 python -m wolf_auditor /path/to/authorized-project --baseline previous-report.json --delta-output delta.json --output current-report.json
+# Bind a local scan to exactly one customer. This is NOT a security certification:
+python -m wolf_auditor /path/to/customer-project --customer-id acme --authorized-root /path/to/customer-project --output scoped.json
 ```
+
+`--customer-id` accepts one customer. A second customer, a path, or a combined id is rejected. `--customer-authorization` must be a regular JSON file with schema `wolf-auditor.customer-authorization.v1` and exactly one `customer_id`; symlink authorization files and extra customers are rejected. `--commit` is accepted only when that full object id is the clean local `HEAD` of the scan root. Any other commit claim is rejected and the scan stays `INCOMPLETE`. None of these results is a security certification.
 
 Exit codes without policy: `0` no findings; `1` review findings; `2` incomplete/error.
 With policy: `0` policy PASS, `3` policy BLOCK, `2` incomplete/error.
