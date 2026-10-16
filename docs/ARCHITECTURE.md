@@ -14,7 +14,7 @@
 - P0 (implemented prototype): Offline read-only scanning, provenance hash, incomplete status, heuristic rules, CLI and unit tests.
 - P1 (partial, prototype): Python AST heuristics, offline Cargo/npm/pip component inventory, SARIF 2.1.0 and CycloneDX 1.6 output. External adapters, independent verification, CVE feeds, production release policy and full language coverage are NOT implemented.
 - P2 (planned): FFI and memory analysis, fuzzing in isolated workers, Windows native checks and negative test generation.
-- P3 (planned): Sandboxed runtime verification, AI-agent security, enterprise roles, multi-project policies and signed human review.
+- P3 (not in this repository): Customer administration, isolated scan workers, retention destruction, reference consent, licensing, API, and panel belong only in the private Wolf-Audit-Enterprise product. This public package does not import that product.
 
 ## Product rules
 
@@ -24,4 +24,5 @@
 - Local customer scope (implemented prototype): a scan may be bound to exactly one authorized customer directory. Symlink path components and symlink targets are rejected instead of followed. A commit id is recorded only when it is that directory's clean local HEAD. Binding, a clean tree, or a matching commit is not a security certification.
 - External review intake (read-only): `assess_external_review` accepts only a local packet. It does not fetch another product's repository. Missing evidence is INCOMPLETE. A complete packet stays NEEDS_REVIEW. The subject name grants no privilege and cannot close review records or produce PASS.
 - Network boundary: no package metadata leaves the machine unless `--osv-online` is provided; private scans must not use public CI artifacts.
+- Open Core boundary: Wolf-Audit is the public scanning engine. Enterprise may depend on a pinned revision of this engine. This engine does not depend on Enterprise.
 - Deliberately unsupported: DAST, native Windows fuzzing, memory exploit proof, broad taint/dataflow, signed reviewer attestation, full CVE completeness.
