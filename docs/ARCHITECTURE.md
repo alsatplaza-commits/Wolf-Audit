@@ -12,7 +12,7 @@
 ## Delivery phases
 
 - P0 (implemented prototype): Offline read-only scanning, provenance hash, incomplete status, heuristic rules, CLI and unit tests.
-- P1 (partial, prototype): Python AST heuristics, offline Cargo/npm/pip component inventory, SARIF 2.1.0 and CycloneDX 1.6 output. External adapters, independent verification, CVE feeds, production release policy and full language coverage are NOT implemented.
+- P1 (implemented prototype): Python AST heuristics with explicit limits, offline Cargo/npm/pip component inventory, SARIF 2.1.0 and CycloneDX 1.6 output. Tests check those documents against the published OASIS and CycloneDX schemas. External adapters, CVE feeds, production release policy and full language coverage are outside P1. Schema checks are not a security certification.
 - P2 (planned): FFI and memory analysis, fuzzing in isolated workers, Windows native checks and negative test generation.
 - P3 (planned): Sandboxed runtime verification, AI-agent security, enterprise roles, multi-project policies and signed human review.
 

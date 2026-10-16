@@ -145,6 +145,9 @@ def scan(root: Path) -> dict[str, Any]:
         if stopped:
             break
 
+    if stopped:
+        gaps.append({"path": "<scan>", "reason": "scan_stopped_before_remaining_files"})
+
     findings.sort(key=lambda f: (f["path"], f["line"], f["rule"]))
     gaps.sort(key=lambda g: (g["path"], g["reason"]))
     excluded.sort(key=lambda g: (g["path"], g["reason"]))
