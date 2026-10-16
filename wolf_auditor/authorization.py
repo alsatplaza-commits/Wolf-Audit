@@ -36,6 +36,13 @@ class RejectedSymlink(OSError):
     """A symlink or non-regular file must not be read."""
 
 
+class OutsideHardlink(Exception):
+    """A regular file has another directory entry outside the scan root."""
+
+
+_REPARSE_POINT = 0x400
+
+
 def parse_single_customer(value: object) -> str:
     """Accept exactly one customer id. Reject lists, paths, and combined ids."""
     if not isinstance(value, str):
@@ -66,20 +73,54 @@ def customer_scope(customer_id: str | None) -> dict[str, Any]:
     }
 
 
+def has_reparse_attribute(attributes: int) -> bool:
+    """Windows FILE_ATTRIBUTE_REPARSE_POINT covers junctions, symlinks, and mount points."""
+    return bool(attributes & _REPARSE_POINT)
+
+
 def is_unfollowed_link(path: Path) -> bool:
-    """True for symlinks and Windows junctions. Unreadable entries fail closed."""
+    """True for symlinks, junctions, and other reparse points. Unreadable entries fail closed."""
     try:
         if path.is_symlink():
             return True
     except OSError:
         return True
     checker = getattr(path, "is_junction", None)
-    if checker is None:
-        return False
+    if checker is not None:
+        try:
+            if checker():
+                return True
+        except OSError:
+            return True
     try:
-        return bool(checker())
+        info = path.lstat()
+    except FileNotFoundError:
+        return False
     except OSError:
         return True
+    if has_reparse_attribute(getattr(info, "st_file_attributes", 0) or 0):
+        return True
+    return False
+
+
+def inode_name_counts(root: Path) -> dict[tuple[int, int], int]:
+    """Count regular-file names inside root without following links."""
+    counts: dict[tuple[int, int], int] = {}
+    for directory, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+        dirnames[:] = [name for name in dirnames if not is_unfollowed_link(Path(directory) / name)]
+        for name in filenames:
+            candidate = Path(directory) / name
+            if is_unfollowed_link(candidate):
+                continue
+            try:
+                info = candidate.lstat()
+            except OSError:
+                continue
+            if not stat.S_ISREG(info.st_mode) or info.st_ino == 0:
+                continue
+            key = (info.st_dev, info.st_ino)
+            counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def _json_object(blob: bytes) -> dict[str, Any]:
@@ -232,7 +273,7 @@ def write_contained_text(path: Path, text: str, boundary: Path | None) -> None:
     _mkdir_contained(final.parent, boundary)
     if is_unfollowed_link(final):
         raise ValueError("symlink output path rejected")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
         fd = os.open(final, flags, 0o600)
     except OSError as error:
@@ -241,8 +282,13 @@ def write_contained_text(path: Path, text: str, boundary: Path | None) -> None:
         raise
     try:
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode):
+        try:
+            current = os.lstat(final)
+        except OSError as error:
+            raise ValueError("symlink output path rejected") from error
+        if not os.path.samestat(info, current) or not stat.S_ISREG(info.st_mode):
             raise ValueError("symlink output path rejected")
+        os.ftruncate(fd, 0)
         os.write(fd, text.encode("utf-8"))
     finally:
         os.close(fd)
@@ -270,8 +316,8 @@ def _mkdir_contained(directory: Path, boundary: Path | None) -> None:
             raise ValueError("symlink output path rejected")
 
 
-def read_regular_file(path: Path, limit: int) -> bytes:
-    """Read a regular file. Symlink targets are not followed."""
+def read_regular_file(path: Path, limit: int, *, max_nlink: int | None = None) -> bytes:
+    """Read a regular file. Symlink targets and outside hard links are not accepted."""
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
         fd = os.open(path, flags)
@@ -281,8 +327,21 @@ def read_regular_file(path: Path, limit: int) -> bytes:
         raise
     try:
         info = os.fstat(fd)
-        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        try:
+            current = os.lstat(path)
+        except OSError as error:
+            raise RejectedSymlink(errno.ELOOP, "symlink target rejected") from error
+        if (
+            not os.path.samestat(info, current)
+            or stat.S_ISLNK(current.st_mode)
+            or has_reparse_attribute(getattr(current, "st_file_attributes", 0) or 0)
+            or not stat.S_ISREG(info.st_mode)
+        ):
             raise RejectedSymlink(errno.EINVAL, "symlink target rejected")
+        if info.st_nlink > 1 and info.st_ino == 0:
+            raise OutsideHardlink()
+        if max_nlink is not None and info.st_nlink > max_nlink:
+            raise OutsideHardlink()
         if info.st_size > limit:
             raise FileTooLarge()
         blob = os.read(fd, limit + 1)

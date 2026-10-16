@@ -6,15 +6,18 @@ import hashlib
 import json
 import os
 import re
+import stat
 from pathlib import Path
 from typing import Any
 
 from .analysis import docker_sast, python_sast, workflow_sast
 from .authorization import (
     FileTooLarge,
+    OutsideHardlink,
     RejectedSymlink,
     assess_commit_claim,
     confine_target,
+    inode_name_counts,
     is_unfollowed_link,
     read_regular_file,
 )
@@ -48,6 +51,7 @@ def scan(
     commit_claim: str | None = None,
 ) -> dict[str, Any]:
     root, _boundary, scope = confine_target(root, authorized_root, customer_id)
+    inside_links = inode_name_counts(root)
     findings: list[dict[str, Any]] = []
     gaps: list[dict[str, str]] = []
     manifest: list[dict[str, str]] = []
@@ -96,15 +100,29 @@ def scan(
                 gaps.append({"path": relative, "reason": "symlink_not_followed"})
                 gaps.append({"path": relative, "reason": "symlink_target_rejected"})
                 continue
+            try:
+                file_info = file.lstat()
+            except OSError as error:
+                gaps.append({"path": relative, "reason": type(error).__name__})
+                continue
+            inside = inside_links.get((file_info.st_dev, file_info.st_ino), 0)
+            if stat.S_ISREG(file_info.st_mode) and file_info.st_nlink > 1 and (
+                file_info.st_ino == 0 or file_info.st_nlink > inside
+            ):
+                gaps.append({"path": relative, "reason": "hardlink_outside_root_rejected"})
+                continue
             if scanned >= MAX_FILES:
                 gaps.append({"path": relative, "reason": "scan_file_budget_exceeded"})
                 stopped = True
                 break
             try:
-                blob = read_regular_file(file, MAX_FILE_BYTES)
+                blob = read_regular_file(file, MAX_FILE_BYTES, max_nlink=inside or None)
                 content = blob.decode("utf-8")
             except FileTooLarge:
                 gaps.append({"path": relative, "reason": "file_size_limit"})
+                continue
+            except OutsideHardlink:
+                gaps.append({"path": relative, "reason": "hardlink_outside_root_rejected"})
                 continue
             except RejectedSymlink:
                 gaps.append({"path": relative, "reason": "symlink_not_followed"})

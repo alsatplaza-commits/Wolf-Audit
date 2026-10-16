@@ -11,7 +11,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-from wolf_auditor.authorization import load_customer_authorization
+from wolf_auditor.authorization import has_reparse_attribute, load_customer_authorization
 from wolf_auditor.engine import scan
 from wolf_auditor.__main__ import main
 
@@ -84,6 +84,42 @@ class AuthorizationTests(unittest.TestCase):
             scan(link, customer_id="acme")
         with self.assertRaisesRegex(ValueError, "symlink path component rejected"):
             scan(link)
+
+    def test_hardlink_outside_root_is_not_scanned(self):
+        secret = "HARDLINK_SECRET_VALUE_123456789"
+        outside = self.make("leak.py", f'api_key = "{secret}"\n', root=Path(self.outside.name))
+        inside = self.root / "leak.py"
+        try:
+            os.link(outside, inside)
+        except OSError:
+            self.skipTest("hard links unavailable")
+        report = scan(self.root, customer_id="acme")
+        encoded = json.dumps(report)
+        self.assertNotIn(secret, encoded)
+        self.assertNotIn("POTENTIAL_HARDCODED_SECRET", encoded)
+        self.assertNotIn("leak.py", [item["path"] for item in report["file_manifest"]])
+        self.assertIn("hardlink_outside_root_rejected", [gap["reason"] for gap in report["coverage_gaps"]])
+        self.assertEqual(report["status"], "INCOMPLETE")
+        self.assertFalse(report["customer_scope"]["certification"])
+
+    def test_hardlink_inside_root_is_still_scanned(self):
+        first = self.make("a.rs", "fn safe() {}\n")
+        second = self.root / "b.rs"
+        try:
+            os.link(first, second)
+        except OSError:
+            self.skipTest("hard links unavailable")
+        report = scan(self.root, customer_id="acme")
+        self.assertEqual(report["status"], "NO_HEURISTIC_FINDINGS")
+        self.assertEqual(report["scanned_files"], 2)
+        self.assertNotIn("hardlink_outside_root_rejected", [gap["reason"] for gap in report["coverage_gaps"]])
+        self.assertFalse(report["customer_scope"]["certification"])
+
+    def test_reparse_point_attribute_is_a_link(self):
+        self.assertTrue(has_reparse_attribute(0x400))
+        self.assertTrue(has_reparse_attribute(0x400 | 0x10))
+        self.assertFalse(has_reparse_attribute(0x10))
+        self.assertFalse(has_reparse_attribute(0))
 
     def test_file_symlink_target_is_not_read(self):
         secret = "FILE_LINK_SECRET_VALUE_123456789"
