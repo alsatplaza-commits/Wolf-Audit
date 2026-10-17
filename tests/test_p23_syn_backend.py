@@ -1,15 +1,18 @@
 """Explicit syn syntax inventory. The default scan does not spawn this backend."""
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
 import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+from wolf_auditor.__main__ import main
 from wolf_auditor.engine import scan
 from wolf_auditor.rust_safety import analyze_rust
 from wolf_auditor.rust_syn import analyze_rust_syntax
@@ -403,3 +406,122 @@ class SynInventoryTests(unittest.TestCase):
         reasons = {item["reason"] for item in gaps}
         self.assertIn("rust_name_resolution_unresolved", reasons)
         self.assertIn("rust_macro_not_expanded", reasons)
+
+
+class ExplicitSynScanTests(unittest.TestCase):
+    def test_explicit_syn_scan_reports_syntax_and_its_limits(self) -> None:
+        source = "\n".join((
+            "#[unsafe(export_name = \"SECRET_SYMBOL_VALUE\")]",
+            "fn renamed() {}",
+            "extern \"system\" { fn OpenProcess(); }",
+            "#[derive(Debug)]",
+            "struct Item;",
+            "#[cfg(not(test))]",
+            "fn go() { crate::missing::item(); }",
+            "mod hidden;",
+            "fn body() { hidden_unsafe!(unsafe { let _x = 1; }); }",
+            "",
+        ))
+        directory = Path(tempfile.mkdtemp())
+        try:
+            (directory / "lib.rs").write_text(source, encoding="utf-8")
+            default = scan(directory)
+            with patch("wolf_auditor.rust_syn.subprocess.run", side_effect=AssertionError("spawned")):
+                self.assertEqual(scan(directory)["analysis_limits"]["parser_stage"], "token_heuristic")
+            report = scan(directory, rust_syntax="syn")
+            again = scan(directory, rust_syntax="syn")
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+        self.assertEqual(report, again)
+        self.assertEqual(default["analysis_limits"]["rust_syn_backend"], "not_invoked_default_scan_does_not_spawn")
+        self.assertNotIn("rust_syn_parse_failed", [item["reason"] for item in default["coverage_gaps"]])
+        self.assertEqual(report["scope"], "read_only_explicit_syn_plus_heuristic")
+        limits = report["analysis_limits"]
+        self.assertEqual(limits["parser_stage"], "explicit_syn_plus_token_heuristic")
+        self.assertEqual(limits["rust_syn_backend"], "invoked_stdin_only_no_macro_expansion")
+        self.assertEqual(limits["rust_macros"], "not_expanded")
+        self.assertEqual(limits["rust_cfg"], "unresolved_not_evaluated")
+        self.assertEqual(limits["rust_names"], "not_resolved")
+        self.assertIs(limits["coverage_claim"], False)
+        self.assertIs(report["cve_coverage"]["completeness"], False)
+        self.assertIsNone(report["cve_coverage"]["queried_at"])
+        self.assertNotIn(report["status"], {"PASS", "REVIEWED", "APPROVED"})
+        rules = {item["rule"] for item in report["findings"]}
+        self.assertIn("RUST_UNSAFE_INVENTORY", rules)
+        self.assertIn("RUST_FFI_BOUNDARY", rules)
+        self.assertIn("RUST_FFI_SYMBOL", rules)
+        reasons = {item["reason"] for item in report["coverage_gaps"]}
+        self.assertIn("rust_macro_not_expanded", reasons)
+        self.assertIn("rust_cfg_unresolved", reasons)
+        self.assertIn("rust_name_resolution_unresolved", reasons)
+        self.assertIn("rust_module_file_not_read", reasons)
+        encoded = json.dumps(report)
+        self.assertNotIn("SECRET_SYMBOL_VALUE", encoded)
+        self.assertNotIn("CVE complete", encoded)
+        with self.assertRaises(ValueError):
+            scan(directory, rust_syntax="compiler")
+
+    def test_malformed_rust_and_missing_backend_fail_closed(self) -> None:
+        directory = Path(tempfile.mkdtemp())
+        try:
+            (directory / "broken.rs").write_text("fn broken( { let _ = \"SECRET_PARSE_TEXT\";\n", encoding="utf-8")
+            (directory / "marked.rs").write_text("unsafe fn marked() {}\n", encoding="utf-8")
+            parsed = scan(directory, rust_syntax="syn")
+            with patch.dict(os.environ, {"WOLF_SYN_BIN": str(directory / "missing-wolf-syn")}):
+                missing = scan(directory, rust_syntax="syn")
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+        self.assertIn("rust_syn_parse_failed", [item["reason"] for item in parsed["coverage_gaps"]])
+        self.assertEqual(parsed["status"], "INCOMPLETE")
+        self.assertNotIn("SECRET_PARSE_TEXT", json.dumps(parsed))
+        self.assertNotIn(parsed["status"], {"PASS", "REVIEWED", "APPROVED"})
+        self.assertEqual(missing["analysis_limits"]["rust_syn_backend"], "explicit_request_incomplete")
+        self.assertIn("rust_syn_backend_unavailable", [item["reason"] for item in missing["coverage_gaps"]])
+        self.assertIn("RUST_UNSAFE_INVENTORY", [item["rule"] for item in missing["findings"]])
+        self.assertIs(missing["analysis_limits"]["coverage_claim"], False)
+        self.assertIs(missing["cve_coverage"]["completeness"], False)
+
+    def test_cli_syn_is_opt_in_and_default_does_not_spawn(self) -> None:
+        directory = Path(tempfile.mkdtemp())
+        try:
+            (directory / "lib.rs").write_text(
+                "fn safe() {}\n// unsafe extern \"C\" { fn system(); }\n",
+                encoding="utf-8",
+            )
+            spawned: list[int] = []
+
+            def spy(*_args, **_kwargs):
+                spawned.append(1)
+                raise AssertionError("spawned")
+
+            with patch("wolf_auditor.rust_syn.subprocess.run", side_effect=spy), patch(
+                "sys.argv", ["wolf-auditor", str(directory)]
+            ), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+                code = main()
+            self.assertEqual(spawned, [])
+            self.assertNotIn("syn inventory opted in", err.getvalue())
+            self.assertNotIn(code, {2})
+            with patch("sys.argv", ["wolf-auditor", str(directory), "--rust-syntax", "syn"]), redirect_stdout(
+                io.StringIO()
+            ) as out, redirect_stderr(io.StringIO()) as err:
+                opted = main()
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+        self.assertIn("syn inventory opted in", err.getvalue())
+        report = json.loads(out.getvalue())
+        self.assertEqual(report["analysis_limits"]["rust_syn_backend"], "invoked_stdin_only_no_macro_expansion")
+        self.assertEqual(report["findings"], [])
+        self.assertEqual(report["coverage_gaps"], [])
+        self.assertIs(report["analysis_limits"]["coverage_claim"], False)
+        self.assertIs(report["cve_coverage"]["completeness"], False)
+        self.assertNotIn(report["status"], {"PASS", "REVIEWED", "APPROVED"})
+        self.assertNotIn(opted, {2})
+        empty = Path(tempfile.mkdtemp())
+        try:
+            (empty / "note.py").write_text("x = 1\n", encoding="utf-8")
+            quiet = scan(empty, rust_syntax="syn")
+        finally:
+            shutil.rmtree(empty, ignore_errors=True)
+        self.assertEqual(quiet["coverage_gaps"], [{"path": "<rust>", "reason": "rust_syn_no_rust_sources"}])
+        self.assertEqual(quiet["status"], "INCOMPLETE")
+        self.assertEqual(quiet["analysis_limits"]["rust_syn_backend"], "explicit_request_incomplete")

@@ -22,6 +22,10 @@ def main() -> int:
     parser.add_argument("--sbom", type=Path, help="optional CycloneDX 1.6 dependency inventory")
     parser.add_argument("--osv-online", action="store_true",
                         help="OPT IN: disclose package names and exact versions to OSV")
+    parser.add_argument("--rust-syntax", choices=("heuristic", "syn"), default="heuristic",
+                        help="OPT IN syn: stdin parse with the trusted wolf_syn helper. "
+                             "Default heuristic does not spawn it. Syn does not expand macros, "
+                             "evaluate cfg, resolve names, or load other modules.")
     parser.add_argument("--policy", type=Path, help="explicit JSON release policy")
     parser.add_argument("--gate-output", type=Path, help="optional JSON policy verdict; requires --policy")
     parser.add_argument("--baseline", type=Path, help="previous evidence JSON to compare against")
@@ -32,10 +36,16 @@ def main() -> int:
             raise ValueError("--gate-output requires --policy")
         if args.delta_output and not args.baseline:
             raise ValueError("--delta-output requires --baseline")
-        report = scan(args.target)
+        report = scan(args.target, rust_syntax=args.rust_syntax)
         if args.osv_online:
             print("OSV disclosure opted in: package names and exact versions sent to OSV", file=sys.stderr)
             report = enrich_with_osv(report)
+        if args.rust_syntax == "syn":
+            print(
+                "Rust syn inventory opted in: trusted helper reads source on stdin; "
+                "macros, cfg, names, and other modules stay unresolved",
+                file=sys.stderr,
+            )
         delta = None
         if args.baseline:
             if args.baseline.stat().st_size > 10_000_000:
