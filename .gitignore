@@ -5,6 +5,7 @@ __pycache__/
 venv/
 *.egg-info/
 build/
+tools/wolf_syn/target/
 .coverage
 reports/
 local-report.json

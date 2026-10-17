@@ -1,0 +1,15 @@
+[package]
+name = "wolf_syn"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Read-only Rust syntax inventory. Does not expand macros or run build scripts."
+
+[[bin]]
+name = "wolf_syn"
+path = "src/main.rs"
+
+[dependencies]
+proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
+serde_json = "1.0.132"
+syn = { version = "2.0.87", features = ["full", "visit"] }

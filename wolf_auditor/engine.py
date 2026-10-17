@@ -13,6 +13,7 @@ from .analysis import docker_sast, python_sast, workflow_sast
 from .osv import cve_coverage_contract
 from .iac import is_kubernetes_manifest, kubernetes_sast, terraform_sast
 from .rust_safety import analyze_rust
+from .rust_syn import analyze_rust_syntax
 from .supply_chain import inventory, is_manifest
 from .windows_native import NATIVE_SUFFIXES, analyze_windows_source
 
@@ -34,7 +35,17 @@ def _sha256(blob: bytes) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
-def scan(root: Path) -> dict[str, Any]:
+def scan(root: Path, *, rust_syntax: str = "heuristic") -> dict[str, Any]:
+    """Scan a directory. ``rust_syntax="syn"`` is an explicit opt-in.
+
+    The default remains the token heuristic and does not spawn ``wolf_syn``.
+    The syn opt-in still runs that heuristic, then adds a stdin-only syntax
+    inventory. It does not expand macros, evaluate ``cfg``, resolve names, or
+    read other module files.
+    """
+    if type(rust_syntax) is not str or rust_syntax not in {"heuristic", "syn"}:
+        raise ValueError("rust_syntax must be heuristic or syn")
+    use_syn = rust_syntax == "syn"
     root = root.expanduser().resolve(strict=True)
     if not root.is_dir():
         raise ValueError("target must be an existing directory")
@@ -45,9 +56,18 @@ def scan(root: Path) -> dict[str, Any]:
     excluded: list[dict[str, str]] = []
     scanned = 0
     stopped = False
+    syn_backends: list[str] = []
+    rust_seen = 0
+    rust_unparsed = 0
 
     def walk_error(error: OSError) -> None:
         gaps.append({"path": "<directory>", "reason": type(error).__name__})
+
+    def skip_unparsed_rust(is_rust: bool) -> None:
+        nonlocal rust_seen, rust_unparsed
+        if use_syn and is_rust:
+            rust_seen += 1
+            rust_unparsed += 1
 
     for directory, dirnames, filenames in os.walk(root, topdown=True, followlinks=False, onerror=walk_error):
         for directory_name in dirnames:
@@ -78,24 +98,30 @@ def scan(root: Path) -> dict[str, Any]:
                 or file.suffix.lower() in NATIVE_SUFFIXES
             ):
                 continue
+            is_rust = file.suffix.lower() == ".rs"
             if file.is_symlink():
                 gaps.append({"path": relative, "reason": "symlink_not_followed"})
+                skip_unparsed_rust(is_rust)
                 continue
             if scanned >= MAX_FILES:
                 gaps.append({"path": relative, "reason": "scan_file_budget_exceeded"})
                 stopped = True
+                skip_unparsed_rust(is_rust)
                 break
             try:
                 if file.stat().st_size > MAX_FILE_BYTES:
                     gaps.append({"path": relative, "reason": "file_size_limit"})
+                    skip_unparsed_rust(is_rust)
                     continue
                 blob = file.read_bytes()
                 if len(blob) > MAX_FILE_BYTES:
                     gaps.append({"path": relative, "reason": "file_size_limit"})
+                    skip_unparsed_rust(is_rust)
                     continue
                 content = blob.decode("utf-8")
             except (OSError, UnicodeError) as error:
                 gaps.append({"path": relative, "reason": type(error).__name__})
+                skip_unparsed_rust(is_rust)
                 continue
             scanned += 1
             manifest.append({"path": relative, "sha256": _sha256(blob)})
@@ -126,10 +152,26 @@ def scan(root: Path) -> dict[str, Any]:
                         "evidence": "heuristic_match_redacted",
                         "verified_exploit": False,
                     })
-            if file.suffix.lower() == ".rs":
+            if is_rust:
                 extra, problems = analyze_rust(relative, content)
                 findings.extend(extra)
                 gaps.extend(problems)
+                if use_syn:
+                    rust_seen += 1
+                    syntax = analyze_rust_syntax(relative, content)
+                    syn_backends.append(str(syntax["backend"]))
+                    seen_findings = {(item["path"], item["line"], item["rule"]) for item in findings}
+                    for item in syntax["findings"]:
+                        key = (item["path"], item["line"], item["rule"])
+                        if key not in seen_findings:
+                            findings.append(item)
+                            seen_findings.add(key)
+                    seen_gaps = {(item["path"], item["reason"], item.get("line")) for item in gaps}
+                    for item in syntax["gaps"]:
+                        key = (item["path"], item["reason"], item.get("line"))
+                        if key not in seen_gaps:
+                            gaps.append(item)
+                            seen_gaps.add(key)
             if file.suffix.lower() in NATIVE_SUFFIXES:
                 extra, problems = analyze_windows_source(relative, content)
                 findings.extend(extra)
@@ -154,14 +196,16 @@ def scan(root: Path) -> dict[str, Any]:
         if stopped:
             break
 
+    if use_syn and rust_seen == 0:
+        gaps.append({"path": "<rust>", "reason": "rust_syn_no_rust_sources"})
     findings.sort(key=lambda f: (f["path"], f["line"], f["rule"]))
-    gaps.sort(key=lambda g: (g["path"], g["reason"]))
+    gaps.sort(key=lambda g: (g["path"], g.get("line", 0), g["reason"]))
     excluded.sort(key=lambda g: (g["path"], g["reason"]))
     dependencies.sort(key=lambda c: (c["source_file"], c["purl"]))
     evidence = {
         "schema": "wolf-auditor.evidence.v1",
         "version": VERSION,
-        "scope": "read_only_heuristic_source_scan",
+        "scope": "read_only_explicit_syn_plus_heuristic" if use_syn else "read_only_heuristic_source_scan",
         "target_directory_name": root.name,
         "scanned_files": scanned,
         "file_manifest": manifest,
@@ -174,6 +218,7 @@ def scan(root: Path) -> dict[str, Any]:
             "rust_macros": "not_expanded",
             "rust_names": "not_resolved",
             "parser_stage": "token_heuristic",
+            "rust_syn_backend": "not_invoked_default_scan_does_not_spawn",
             "windows_native_runtime": "not_executed_read_only_no_process_access",
             "fuzz_on_target": "not_executed_untrusted_target_not_run",
             "coverage_claim": False,
@@ -184,6 +229,17 @@ def scan(root: Path) -> dict[str, Any]:
         "status": "INCOMPLETE" if gaps else ("REVIEW_REQUIRED" if findings else "NO_HEURISTIC_FINDINGS"),
         "claim": "No security certification; passing is not proof of absence of vulnerabilities.",
     }
+    if use_syn:
+        failed = (
+            rust_seen == 0
+            or rust_unparsed > 0
+            or any(item != "syn" for item in syn_backends)
+        )
+        evidence["analysis_limits"]["rust_syntax"] = "explicit_syn_plus_token_heuristic"
+        evidence["analysis_limits"]["parser_stage"] = "explicit_syn_plus_token_heuristic"
+        evidence["analysis_limits"]["rust_syn_backend"] = (
+            "explicit_request_incomplete" if failed else "invoked_stdin_only_no_macro_expansion"
+        )
     canonical = json.dumps(evidence, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     evidence["report_sha256"] = _sha256(canonical)
     return evidence
