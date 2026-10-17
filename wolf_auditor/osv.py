@@ -20,6 +20,7 @@ MAX_QUERIES = 2000
 MAX_RESPONSE_BYTES = 4_000_000
 ECOSYSTEMS = {"cargo": "crates.io", "npm": "npm", "pypi": "PyPI"}
 IDENTIFIER = re.compile(r"^[A-Za-z0-9._-]{3,128}$")
+ADVISORY_MODIFIED = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$")
 Fetch = Callable[[list[dict[str, Any]]], dict[str, Any]]
 
 
@@ -55,16 +56,23 @@ def _seal(report: dict[str, Any]) -> dict[str, Any]:
     return report
 
 
-def cve_coverage_contract(*, mode: str) -> dict[str, Any]:
-    """Describe CVE lookup scope. Completeness is fixed false; callers cannot set it."""
+def cve_coverage_contract(*, mode: str, freshness: str = "not recorded") -> dict[str, Any]:
+    """Describe CVE lookup scope. Completeness is fixed false; callers cannot set it.
+
+    ``queried_at`` stays null because this client does not stamp the request.
+    ``freshness`` is the newest advisory ``modified`` time actually returned,
+    and only when that value matches a UTC timestamp. It is not a database snapshot.
+    """
     if mode not in {"offline", "online"}:
         raise ValueError("invalid cve coverage mode")
+    if freshness != "not recorded" and ADVISORY_MODIFIED.fullmatch(freshness) is None:
+        freshness = "not recorded"
     return {
         "source": "OSV querybatch" if mode == "online" else None,
         "queried_at": None,
         "match": "exact ecosystem, name, and version" if mode == "online" else "not queried",
         "mode": mode,
-        "freshness": "not recorded",
+        "freshness": freshness,
         "completeness": False,
         "statement": "This is not a complete CVE review.",
     }
@@ -100,6 +108,7 @@ def enrich_with_osv(report: dict[str, Any], *, fetcher: Fetch | None = None) -> 
 
     checked = 0
     failed = False
+    modified_stamps: set[str] = set()
     keys = sorted(unique)
     if len(keys) > MAX_QUERIES:
         problems.append({"path": "<dependency-inventory>", "reason": "osv_query_budget_exceeded"})
@@ -129,6 +138,9 @@ def enrich_with_osv(report: dict[str, Any], *, fetcher: Fetch | None = None) -> 
                     advisory = vuln["id"]
                     if not IDENTIFIER.fullmatch(advisory):
                         raise ValueError("invalid OSV advisory identifier")
+                    modified = vuln.get("modified")
+                    if isinstance(modified, str) and ADVISORY_MODIFIED.fullmatch(modified):
+                        modified_stamps.add(modified)
                     for path in sorted(set(unique[(ecosystem, name, version)])):
                         candidate_findings.append({
                             "rule": "OSV_MATCHED_ADVISORY",
@@ -151,7 +163,8 @@ def enrich_with_osv(report: dict[str, Any], *, fetcher: Fetch | None = None) -> 
     findings.sort(key=lambda row: (row["path"], row["line"], row["rule"], row.get("advisory_id", "")))
     all_done = not failed and not any(g["reason"].startswith("osv_") for g in problems)
     state = "COMPLETE" if all_done and checked else ("NO_DEPENDENCIES" if all_done else "INCOMPLETE")
-    coverage = cve_coverage_contract(mode="online")
+    freshness = max(modified_stamps) if modified_stamps else "not recorded"
+    coverage = cve_coverage_contract(mode="online", freshness=freshness)
     checks["osv"] = {
         "state": state, "queried_versions": checked,
         "provider": "OSV querybatch", "network_disclosure": "package names and exact versions",
