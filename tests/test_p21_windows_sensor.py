@@ -22,6 +22,24 @@ _FORBIDDEN_KEYS = {
 _FORBIDDEN_STATUS = {"PASS", "REVIEWED", "APPROVED"}
 
 
+def _kernel_open_limited(pid: int) -> tuple[bool, int]:
+    """One real OpenProcess call. Returns whether it opened and the Win32 error."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    error = int(ctypes.get_last_error())
+    if not handle:
+        return False, error
+    kernel.CloseHandle(handle)
+    return True, 0
+
+
 class _Api:
     def __init__(self, handle: int, error: int = 0, ok: bool = True, code: int = 259) -> None:
         self.handle = handle
@@ -169,6 +187,82 @@ class WindowsSensorTests(unittest.TestCase):
             self.assertEqual(raced["process_state"], "exited")
         self.assertFalse(raced["memory_read"])
         self._assert_minimized(raced)
+
+    @unittest.skipUnless(sys.platform == "win32", "real OpenProcess evidence runs only on the Windows runner")
+    def test_system_pid_records_real_open_process_error(self) -> None:
+        opened, error = _kernel_open_limited(4)
+        result = inspect_process(4, enabled=True)
+        print(
+            "WINDOWS_NATIVE_EVIDENCE "
+            + json.dumps({
+                "case": "system_pid",
+                "pid": 4,
+                "os_opened": opened,
+                "os_error": error,
+                "status": result["status"],
+                "reason": result["reason"],
+                "process_state": result.get("process_state"),
+                "process_access": result["process_access"],
+            }, sort_keys=True),
+            flush=True,
+        )
+        self._assert_sensor_matches_os(opened, error, result)
+
+    @unittest.skipUnless(sys.platform == "win32", "real exit query runs only on the Windows runner")
+    def test_killed_owned_process_records_exact_exit_result(self) -> None:
+        self._child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        running = inspect_process(self._child.pid, enabled=True)
+        self.assertEqual(running["status"], "QUERY_LIMITED")
+        self.assertEqual(running["process_state"], "running")
+        self._child.kill()
+        self._child.wait(timeout=5)
+        opened, error = _kernel_open_limited(self._child.pid)
+        result = inspect_process(self._child.pid, enabled=True)
+        print(
+            "WINDOWS_NATIVE_EVIDENCE "
+            + json.dumps({
+                "case": "owned_exit",
+                "pid": self._child.pid,
+                "os_opened": opened,
+                "os_error": error,
+                "status": result["status"],
+                "reason": result["reason"],
+                "process_state": result.get("process_state"),
+                "process_access": result["process_access"],
+            }, sort_keys=True),
+            flush=True,
+        )
+        self._assert_sensor_matches_os(opened, error, result)
+        self.assertTrue(opened, f"owned process open failed with Win32 error {error}")
+        self.assertEqual(result["status"], "QUERY_LIMITED")
+        self.assertEqual(result["process_state"], "exited")
+        self.assertEqual(result["reason"], "query_limited_information")
+
+    def _assert_sensor_matches_os(self, opened: bool, error: int, result: dict) -> None:
+        self.assertFalse(result["memory_read"])
+        self.assertFalse(result["dump_collected"])
+        self.assertFalse(result["coverage_claim"])
+        self.assertNotIn(result["status"], _FORBIDDEN_STATUS)
+        self._assert_minimized(result)
+        if not opened:
+            self.assertFalse(result["process_access"])
+            if error == 5:
+                self.assertEqual(result["status"], "NOT_EXECUTED")
+                self.assertEqual(result["reason"], "access_denied")
+            elif error == 87:
+                self.assertEqual(result["status"], "NOT_EXECUTED")
+                self.assertEqual(result["reason"], "process_not_found")
+            else:
+                self.assertEqual(result["status"], "INCOMPLETE")
+                self.assertEqual(result["reason"], "open_process_failed")
+            return
+        self.assertTrue(result["process_access"])
+        self.assertEqual(result["access_rights"], ["PROCESS_QUERY_LIMITED_INFORMATION"])
+        if result["status"] == "INCOMPLETE":
+            self.assertEqual(result["reason"], "process_exit_race")
+            return
+        self.assertEqual(result["status"], "QUERY_LIMITED")
+        self.assertIn(result["process_state"], {"running", "exited"})
 
     def _assert_minimized(self, result: dict) -> None:
         self.assertTrue(_FORBIDDEN_KEYS.isdisjoint(result))
