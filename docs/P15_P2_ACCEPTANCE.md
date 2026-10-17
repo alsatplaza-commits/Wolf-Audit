@@ -26,6 +26,7 @@ Statuses used here:
 | Delta refuses a tampered digest or a different target | Locked | `test_delta_reports_new_and_resolved_findings`, `test_delta_rejects_modified_evidence`, `test_delta_rejects_other_target` |
 | SARIF and CycloneDX carry the advisory id, not source text | Locked | `test_sbom_contains_linked_osv_vulnerability`, `test_osv_partial_batch_stays_incomplete` |
 | CVE coverage contract records source, query time, match, mode, freshness, and completeness | Locked, `completeness` false | `test_cve_contract_is_never_complete`. `queried_at` is null because this client does not record a provider timestamp. |
+| Advisory `modified` time is kept only when it is a UTC timestamp | Locked | `test_advisory_modified_time_is_freshness_not_completeness`. A missing or non-timestamp value stays `not recorded`. |
 | Real OSV corpus equals all applicable CVEs | HOLD | The contract says this is not a complete CVE review. |
 
 ## P2
@@ -39,6 +40,8 @@ Statuses used here:
 | `include!` hides unseen source | Locked, gap `rust_macro_not_expanded` | same test |
 | Macro body tokens are inventoried; a macro invocation is an explicit gap | Locked, gap `rust_macro_not_expanded` | `test_rust_macro_boundaries_are_not_a_parser_pass`, `test_hidden_macro_cfg_and_path_are_incomplete` |
 | `cfg` is not evaluated | Locked, gap `rust_cfg_unresolved` | same tests |
+| `cfg_attr` and `#[derive]` are not treated as clean source | Locked, gaps `rust_cfg_unresolved` and `rust_macro_not_expanded` | `test_attribute_macros_are_not_a_clean_result` |
+| Classified attributes such as `unsafe(no_mangle)` stay review findings | Locked | `test_known_attributes_are_not_relabelled_as_macros` |
 | Path names are not resolved | Locked, gap `rust_name_resolution_unresolved` | `test_hidden_macro_cfg_and_path_are_incomplete` |
 | Comments and strings do not create those gaps | Locked | `test_comments_and_strings_do_not_create_resolution_gaps` |
 | Language registry is not Rust-only and does not compile | Locked | `test_registry_is_not_rust_only_and_does_not_compile` |

@@ -25,6 +25,18 @@ _RISKY_TAIL = {
     ("from_raw_parts_mut",),
 }
 _SYMBOL_ATTRS = {"no_mangle", "export_name", "link_name"}
+# Attribute names this heuristic can classify without running a macro.
+# derive and cfg_attr are intentionally absent.
+_RESOLVED_ATTRIBUTE_HEADS = {
+    "allow", "deny", "warn", "forbid", "expect",
+    "cfg", "doc", "deprecated", "must_use",
+    "inline", "cold", "repr", "unsafe",
+    "no_mangle", "export_name", "link_name", "link", "link_section", "used",
+    "test", "ignore", "should_panic",
+    "path", "non_exhaustive", "target_feature",
+    "crate_name", "crate_type", "no_main", "no_std", "feature",
+    "recursion_limit", "windows_subsystem",
+}
 
 
 def analyze_rust(path: str, content: str) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
@@ -96,6 +108,10 @@ def _record_unresolved(path: str, tokens: list[_Token], gaps: list[dict[str, str
         nxt = tokens[index + 1] if index + 1 < len(tokens) else None
         if token.kind == "ident" and token.text == "cfg":
             add("rust_cfg_unresolved")
+        if getattr(token, "attribute_head", False) and token.text == "cfg_attr":
+            add("rust_cfg_unresolved")
+        elif getattr(token, "attribute_head", False) and token.text not in _RESOLVED_ATTRIBUTE_HEADS:
+            add("rust_macro_not_expanded")
         if token.kind == "ident" and nxt is not None and nxt.text == "!":
             add("rust_macro_not_expanded")
         if token.text == "::":
@@ -125,6 +141,7 @@ class _Token:
         self.text = text
         self.line = line
         self.in_attribute = in_attribute
+        self.attribute_head = False
 
 
 def _tokenize(path: str, content: str) -> tuple[list[_Token], list[dict[str, str]]]:
@@ -201,6 +218,10 @@ def _tokenize(path: str, content: str) -> tuple[list[_Token], list[dict[str, str
             for token in inner:
                 token.in_attribute = True
                 token.line += line - 1
+            for token in inner:
+                if token.kind == "ident":
+                    token.attribute_head = True
+                    break
             tokens.extend(inner)
             gaps.extend(inner_gaps)
             line += chars.count("\n", index, end)
