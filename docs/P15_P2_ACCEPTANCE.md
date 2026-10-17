@@ -46,7 +46,7 @@ Statuses used here:
 | Comments and strings do not create those gaps | Locked | `test_comments_and_strings_do_not_create_resolution_gaps` |
 | Language registry is not Rust-only and does not compile | Locked | `test_registry_is_not_rust_only_and_does_not_compile` |
 | syn syntax inventory, explicit call only | Locked when `wolf_syn` is built. Default scan does not spawn it. | `tests/test_p23_syn_backend.py` (`test_syn_inventory_matches_syntax`, `test_default_scan_does_not_spawn_syn`) |
-| Explicit scan opt-in `--rust-syntax syn` | Locked. Heuristic findings stay. Syn adds syntax evidence and its gaps. | `test_explicit_syn_scan_reports_syntax_and_its_limits` |
+| Explicit scan opt-in `--rust-syntax syn` | Locked. Heuristic findings stay. Syn adds syntax evidence and its gaps. A Rust file that is skipped or whose backend is unavailable is `explicit_request_incomplete`, not “no Rust sources” and not a complete syn invocation. | `test_explicit_syn_scan_reports_syntax_and_its_limits`, `test_skipped_rust_is_incomplete_not_absent` |
 | Macro expansion, cfg evaluation, name resolution, and rust-analyzer | HOLD | The syn backend records those as gaps. It does not run build scripts, procedural macros, or rust-analyzer. |
 | Raw pointers and `static mut` in the syn inventory | Locked as gaps, not findings | `test_unclassified_pointers_and_static_mut_are_gaps`. The default token heuristic still reports its own findings. |
 | Full Rust parser, build-cfg reachability, name resolution | HOLD | Gaps above are the absence of those analyses, not a compiler result. P2.3 is not complete. |

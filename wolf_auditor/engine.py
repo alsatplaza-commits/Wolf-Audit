@@ -57,9 +57,17 @@ def scan(root: Path, *, rust_syntax: str = "heuristic") -> dict[str, Any]:
     scanned = 0
     stopped = False
     syn_backends: list[str] = []
+    rust_seen = 0
+    rust_unparsed = 0
 
     def walk_error(error: OSError) -> None:
         gaps.append({"path": "<directory>", "reason": type(error).__name__})
+
+    def skip_unparsed_rust(is_rust: bool) -> None:
+        nonlocal rust_seen, rust_unparsed
+        if use_syn and is_rust:
+            rust_seen += 1
+            rust_unparsed += 1
 
     for directory, dirnames, filenames in os.walk(root, topdown=True, followlinks=False, onerror=walk_error):
         for directory_name in dirnames:
@@ -90,24 +98,30 @@ def scan(root: Path, *, rust_syntax: str = "heuristic") -> dict[str, Any]:
                 or file.suffix.lower() in NATIVE_SUFFIXES
             ):
                 continue
+            is_rust = file.suffix.lower() == ".rs"
             if file.is_symlink():
                 gaps.append({"path": relative, "reason": "symlink_not_followed"})
+                skip_unparsed_rust(is_rust)
                 continue
             if scanned >= MAX_FILES:
                 gaps.append({"path": relative, "reason": "scan_file_budget_exceeded"})
                 stopped = True
+                skip_unparsed_rust(is_rust)
                 break
             try:
                 if file.stat().st_size > MAX_FILE_BYTES:
                     gaps.append({"path": relative, "reason": "file_size_limit"})
+                    skip_unparsed_rust(is_rust)
                     continue
                 blob = file.read_bytes()
                 if len(blob) > MAX_FILE_BYTES:
                     gaps.append({"path": relative, "reason": "file_size_limit"})
+                    skip_unparsed_rust(is_rust)
                     continue
                 content = blob.decode("utf-8")
             except (OSError, UnicodeError) as error:
                 gaps.append({"path": relative, "reason": type(error).__name__})
+                skip_unparsed_rust(is_rust)
                 continue
             scanned += 1
             manifest.append({"path": relative, "sha256": _sha256(blob)})
@@ -138,11 +152,12 @@ def scan(root: Path, *, rust_syntax: str = "heuristic") -> dict[str, Any]:
                         "evidence": "heuristic_match_redacted",
                         "verified_exploit": False,
                     })
-            if file.suffix.lower() == ".rs":
+            if is_rust:
                 extra, problems = analyze_rust(relative, content)
                 findings.extend(extra)
                 gaps.extend(problems)
                 if use_syn:
+                    rust_seen += 1
                     syntax = analyze_rust_syntax(relative, content)
                     syn_backends.append(str(syntax["backend"]))
                     seen_findings = {(item["path"], item["line"], item["rule"]) for item in findings}
@@ -181,7 +196,7 @@ def scan(root: Path, *, rust_syntax: str = "heuristic") -> dict[str, Any]:
         if stopped:
             break
 
-    if use_syn and not syn_backends:
+    if use_syn and rust_seen == 0:
         gaps.append({"path": "<rust>", "reason": "rust_syn_no_rust_sources"})
     findings.sort(key=lambda f: (f["path"], f["line"], f["rule"]))
     gaps.sort(key=lambda g: (g["path"], g.get("line", 0), g["reason"]))
@@ -215,7 +230,11 @@ def scan(root: Path, *, rust_syntax: str = "heuristic") -> dict[str, Any]:
         "claim": "No security certification; passing is not proof of absence of vulnerabilities.",
     }
     if use_syn:
-        failed = (not syn_backends) or any(item != "syn" for item in syn_backends)
+        failed = (
+            rust_seen == 0
+            or rust_unparsed > 0
+            or any(item != "syn" for item in syn_backends)
+        )
         evidence["analysis_limits"]["rust_syntax"] = "explicit_syn_plus_token_heuristic"
         evidence["analysis_limits"]["parser_stage"] = "explicit_syn_plus_token_heuristic"
         evidence["analysis_limits"]["rust_syn_backend"] = (
