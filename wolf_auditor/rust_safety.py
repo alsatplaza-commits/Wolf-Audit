@@ -75,9 +75,31 @@ def analyze_rust(path: str, content: str) -> tuple[list[dict[str, Any]], list[di
                 gaps.append(row)
         if _risky_call(tokens, index):
             add("RUST_FFI_RISKY_CALL", "medium", token.line)
+    _record_unresolved(path, tokens, gaps)
     findings.sort(key=lambda item: (item["line"], item["rule"]))
     gaps.sort(key=lambda item: (item["path"], item["reason"]))
     return findings, gaps
+
+
+def _record_unresolved(path: str, tokens: list[_Token], gaps: list[dict[str, str]]) -> None:
+    """Cfg, macros, and paths are not resolved. Record that limit instead of a clean parse."""
+    seen = {(item["path"], item["reason"]) for item in gaps}
+
+    def add(reason: str) -> None:
+        key = (path, reason)
+        if key in seen:
+            return
+        seen.add(key)
+        gaps.append({"path": path, "reason": reason})
+
+    for index, token in enumerate(tokens):
+        nxt = tokens[index + 1] if index + 1 < len(tokens) else None
+        if token.kind == "ident" and token.text == "cfg":
+            add("rust_cfg_unresolved")
+        if token.kind == "ident" and nxt is not None and nxt.text == "!":
+            add("rust_macro_not_expanded")
+        if token.text == "::":
+            add("rust_name_resolution_unresolved")
 
 
 def _risky_call(tokens: list[_Token], index: int) -> bool:

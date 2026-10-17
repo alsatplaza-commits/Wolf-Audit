@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .analysis import docker_sast, python_sast, workflow_sast
+from .osv import cve_coverage_contract
 from .iac import is_kubernetes_manifest, kubernetes_sast, terraform_sast
 from .rust_safety import analyze_rust
 from .supply_chain import inventory, is_manifest
@@ -169,10 +170,15 @@ def scan(root: Path) -> dict[str, Any]:
         "dependency_inventory_scope": "offline manifests only; no CVE lookup or transitive verification",
         "analysis_limits": {
             "rust_syntax": "token_heuristic_not_a_rust_parser",
+            "rust_cfg": "unresolved_not_evaluated",
+            "rust_macros": "not_expanded",
+            "rust_names": "not_resolved",
+            "parser_stage": "token_heuristic",
             "windows_native_runtime": "not_executed_read_only_no_process_access",
             "fuzz_on_target": "not_executed_untrusted_target_not_run",
             "coverage_claim": False,
         },
+        "cve_coverage": cve_coverage_contract(mode="offline"),
         "findings": findings,
         "coverage_gaps": gaps,
         "status": "INCOMPLETE" if gaps else ("REVIEW_REQUIRED" if findings else "NO_HEURISTIC_FINDINGS"),

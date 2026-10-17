@@ -55,6 +55,21 @@ def _seal(report: dict[str, Any]) -> dict[str, Any]:
     return report
 
 
+def cve_coverage_contract(*, mode: str) -> dict[str, Any]:
+    """Describe CVE lookup scope. Completeness is fixed false; callers cannot set it."""
+    if mode not in {"offline", "online"}:
+        raise ValueError("invalid cve coverage mode")
+    return {
+        "source": "OSV querybatch" if mode == "online" else None,
+        "queried_at": None,
+        "match": "exact ecosystem, name, and version" if mode == "online" else "not queried",
+        "mode": mode,
+        "freshness": "not recorded",
+        "completeness": False,
+        "statement": "This is not a complete CVE review.",
+    }
+
+
 def enrich_with_osv(report: dict[str, Any], *, fetcher: Fetch | None = None) -> dict[str, Any]:
     """Return a separately hashed report; the original report is never modified.
 
@@ -136,10 +151,13 @@ def enrich_with_osv(report: dict[str, Any], *, fetcher: Fetch | None = None) -> 
     findings.sort(key=lambda row: (row["path"], row["line"], row["rule"], row.get("advisory_id", "")))
     all_done = not failed and not any(g["reason"].startswith("osv_") for g in problems)
     state = "COMPLETE" if all_done and checked else ("NO_DEPENDENCIES" if all_done else "INCOMPLETE")
+    coverage = cve_coverage_contract(mode="online")
     checks["osv"] = {
         "state": state, "queried_versions": checked,
         "provider": "OSV querybatch", "network_disclosure": "package names and exact versions",
         "fetched_utc": None, "disclaimer": "OSV match is not an exploit proof or complete security guarantee",
+        "coverage": coverage,
     }
+    enriched["cve_coverage"] = coverage
     enriched["status"] = _status(enriched)
     return _seal(enriched)

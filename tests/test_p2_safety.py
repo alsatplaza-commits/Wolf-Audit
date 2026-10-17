@@ -91,7 +91,7 @@ class P2SafetyTests(unittest.TestCase):
         body, gaps = analyze_rust(
             "m.rs", "macro_rules! m { () => { unsafe { foreign(); } } }\n",
         )
-        self.assertEqual(gaps, [])
+        self.assertIn("rust_macro_not_expanded", [item["reason"] for item in gaps])
         self.assertEqual(body[0]["rule"], "RUST_UNSAFE_INVENTORY")
         self.assertFalse(body[0]["verified_exploit"])
         weird, weird_gaps = analyze_rust("w.rs", "unsafe! { foreign(); }\n")
@@ -99,7 +99,7 @@ class P2SafetyTests(unittest.TestCase):
         self.assertEqual(weird_gaps[0]["reason"], "rust_heuristic_unclassified_unsafe")
         cfg, cfg_gaps = analyze_rust("c.rs", '#[cfg(feature = "extern \\"system\\"")]\nfn safe() {}\n')
         self.assertEqual(cfg, [])
-        self.assertEqual(cfg_gaps, [])
+        self.assertEqual([item["reason"] for item in cfg_gaps], ["rust_cfg_unresolved"])
         ffi, ffi_gaps = analyze_rust("e.rs", 'extern "C" fn exported() {}\n')
         self.assertEqual(ffi_gaps, [])
         self.assertEqual(ffi[0]["rule"], "RUST_FFI_BOUNDARY")
