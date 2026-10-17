@@ -80,6 +80,39 @@ class P2SafetyTests(unittest.TestCase):
         self.assertTrue(all(item["rule"] == "RUST_FFI_SYMBOL" for item in findings))
         self.assertNotIn(marker, json.dumps(findings))
 
+    def test_rust_macro_boundaries_are_not_a_parser_pass(self):
+        hidden = analyze_rust("a.rs", 'include!("hidden.rs");\nfn safe() {}\n')
+        self.assertEqual(hidden[0], [])
+        self.assertEqual(hidden[1][0]["reason"], "rust_macro_not_expanded")
+        self.make("hidden.rs", 'include!("other.rs");\n')
+        report = scan(self.root)
+        self.assertEqual(report["status"], "INCOMPLETE")
+        self.assertNotEqual(report["status"], "NO_HEURISTIC_FINDINGS")
+        body, gaps = analyze_rust(
+            "m.rs", "macro_rules! m { () => { unsafe { foreign(); } } }\n",
+        )
+        self.assertEqual(gaps, [])
+        self.assertEqual(body[0]["rule"], "RUST_UNSAFE_INVENTORY")
+        self.assertFalse(body[0]["verified_exploit"])
+        weird, weird_gaps = analyze_rust("w.rs", "unsafe! { foreign(); }\n")
+        self.assertEqual(weird, [])
+        self.assertEqual(weird_gaps[0]["reason"], "rust_heuristic_unclassified_unsafe")
+        cfg, cfg_gaps = analyze_rust("c.rs", '#[cfg(feature = "extern \\"system\\"")]\nfn safe() {}\n')
+        self.assertEqual(cfg, [])
+        self.assertEqual(cfg_gaps, [])
+        ffi, ffi_gaps = analyze_rust("e.rs", 'extern "C" fn exported() {}\n')
+        self.assertEqual(ffi_gaps, [])
+        self.assertEqual(ffi[0]["rule"], "RUST_FFI_BOUNDARY")
+
+    def test_scan_does_not_execute_fuzz_harness(self):
+        self.make("app.py", "print('ok')\n")
+        with patch("wolf_auditor.fuzz_control.run_controlled_fuzz", side_effect=AssertionError("target executed")):
+            report = scan(self.root)
+        self.assertEqual(report["status"], "NO_HEURISTIC_FINDINGS")
+        self.assertFalse(report["analysis_limits"]["coverage_claim"])
+        self.assertEqual(report["analysis_limits"]["fuzz_on_target"], "not_executed_untrusted_target_not_run")
+        self.assertEqual(report["analysis_limits"]["windows_native_runtime"], "not_executed_read_only_no_process_access")
+
     def test_broken_rust_is_incomplete_not_pass(self):
         findings, gaps = analyze_rust("a.rs", 'let s = "unsafe { extern \\"system\\";\n')
         self.assertEqual(findings, [])

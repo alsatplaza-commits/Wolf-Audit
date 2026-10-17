@@ -69,6 +69,10 @@ def analyze_rust(path: str, content: str) -> tuple[list[dict[str, Any]], list[di
                 gaps.append({"path": path, "reason": "rust_heuristic_unclassified_extern"})
         elif token.text == "static" and nxt and nxt.text == "mut":
             add("RUST_STATIC_MUT", "medium", token.line)
+        elif token.text == "include" and nxt and nxt.text == "!":
+            row = {"path": path, "reason": "rust_macro_not_expanded"}
+            if row not in gaps:
+                gaps.append(row)
         if _risky_call(tokens, index):
             add("RUST_FFI_RISKY_CALL", "medium", token.line)
     findings.sort(key=lambda item: (item["line"], item["rule"]))
