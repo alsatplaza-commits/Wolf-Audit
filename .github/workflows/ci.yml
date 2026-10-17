@@ -21,6 +21,18 @@ jobs:
       - name: Unit tests (safe fixtures)
         shell: bash
         run: python -m unittest discover -s tests -v
+      - name: Package install and import
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/wolfvenv"
+          if [ -x "$RUNNER_TEMP/wolfvenv/bin/python" ]; then
+            py="$RUNNER_TEMP/wolfvenv/bin/python"
+          else
+            py="$RUNNER_TEMP/wolfvenv/Scripts/python.exe"
+          fi
+          "$py" -m pip install --disable-pip-version-check .
+          cd "$RUNNER_TEMP"
+          "$py" -c "import wolf_auditor; from wolf_auditor.rust_safety import analyze_rust; from wolf_auditor.windows_native import runtime_inspection; from wolf_auditor.fuzz_control import run_controlled_fuzz; assert 'site-packages' in wolf_auditor.__file__.replace('\\\\','/'); info=runtime_inspection(); assert info['status'] != 'PASS' and info['coverage_claim'] is False; result=run_controlled_fuzz(None, seed=b'abc', iterations=1, timeout_seconds=1, max_input_bytes=4); assert result['coverage_claim'] is False and result['status']=='NOT_EXECUTED'"
       - name: Self-audit (read-only, explicit non-certification)
         shell: bash
         run: |

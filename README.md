@@ -7,7 +7,9 @@
 ## Available now (with Linux / Windows regression tests)
 
 - Bounded, offline, read-only source tree traversal (no execution of the project being scanned).
-- Inventory Rust `unsafe` blocks for expert review. `unsafe` is **not** treated as proof of a vulnerability.
+- Inventory Rust `unsafe` blocks, `unsafe` attributes, `extern "C"` / `extern "system"` boundaries, `no_mangle` / `export_name` / `link_name`, raw pointers, `static mut`, and selected FFI calls for expert review. Comments and string literals are not treated as code. This is a token heuristic, **not** a Rust parser. `unsafe` is **not** proof of a vulnerability.
+- Inventory selected Windows process, privilege, and dynamic-load API names in C/C++ source. The scanner does not open processes. On every host the Windows runtime check stays `NOT_EXECUTED` and native source files are INCOMPLETE until a real runtime inspection exists.
+- Controlled fuzz harness for a callable the caller supplies: deterministic seeds, iteration and timeout limits, crash/timeout/allocation separation, and replay bytes. Repository scanning does not execute it and does not claim fuzz coverage.
 - Flag non-SHA-pinned `uses:` dependencies in GitHub Actions workflow files (heuristic).
 - Flag some hard-coded tokens/keys, with the matched line/value omitted from reports (heuristic).
 - JSON evidence: source file SHA-256 manifest, finding provenance, coverage gaps, deterministic report hash.
@@ -60,6 +62,9 @@ Target domains (several limited baseline components are implemented, NOT complet
 - Local hashes detect unintentional report modification, not independent authenticity or human approval.
 - No dynamic execution, endpoint probes or private repository scans occur automatically.
 - No FFI expert-review register is self-approved by an automated WOLF AUDITOR result.
+- Rust FFI inventory misses macros and some literal forms. A gap is recorded when a comment, string, or attribute is unclosed. It is not compiler-accurate.
+- Windows native runtime inspection is not implemented. Finding an API name is not proof that the call is reachable or permitted.
+- The fuzz harness never runs code from the audited tree. `coverage_claim` stays false.
 
 The WOLF SENTINEL private repository is **not bundled**, imported, mirrored, or exposed here. It can be an authorized private test target later through a safe workflow with separate access controls.
 
