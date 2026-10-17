@@ -6,7 +6,9 @@ binary parses with syn. It does not expand macros, evaluate ``cfg``, resolve
 names, read other files, or run the scanned repository.
 
 A missing backend, a rejected executable, or an unusable result is a coverage
-gap. ``coverage_claim`` is always false.
+gap. ``coverage_claim`` is always false. A later parse error keeps findings
+from lines before the error and still records ``rust_syn_parse_failed``.
+That prefix is not a complete parse of the file.
 """
 from __future__ import annotations
 

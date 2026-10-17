@@ -191,6 +191,85 @@ class SynInventoryTests(unittest.TestCase):
             (item["rule"], item["line"]) for item in windows["findings"]
         })
 
+    def test_parse_failure_keeps_earlier_valid_items(self) -> None:
+        source = "\n".join((
+            "#![cfg(test)]",
+            "unsafe fn marked() {}",
+            "extern \"C\" { fn open(); }",
+            "#[link(name = \"c\")]",
+            "extern \"C\" {}",
+            "#[unsafe]",
+            "fn flagged() {}",
+            "fn { let _ = \"SECRET_PARSE_TEXT\";",
+            "",
+        ))
+        result = analyze_rust_syntax("partial.rs", source)
+        self.assertEqual(result["backend"], "syn")
+        for flag in ("coverage_claim", "macros_expanded", "cfg_evaluated", "names_resolved"):
+            self.assertIs(result[flag], False)
+        findings = {(item["rule"], item["line"]) for item in result["findings"]}
+        self.assertIn(("RUST_UNSAFE_INVENTORY", _line_of(source, "unsafe fn marked")), findings)
+        self.assertIn(("RUST_FFI_BOUNDARY", _line_of(source, "extern \"C\" { fn open")), findings)
+        self.assertIn(("RUST_FFI_BOUNDARY", _line_of(source, "#[link(name = \"c\")]")), findings)
+        self.assertIn(("RUST_FFI_BOUNDARY", _line_of(source, "extern \"C\" {}")), findings)
+        self.assertIn(("RUST_UNSAFE_INVENTORY", _line_of(source, "#[unsafe]")), findings)
+        broken_line = _line_of(source, "fn {")
+        self.assertNotIn(broken_line, [item["line"] for item in result["findings"]])
+        gaps = {(item["reason"], item["line"]) for item in result["gaps"]}
+        self.assertIn(("rust_cfg_unresolved", _line_of(source, "#![cfg(test)]")), gaps)
+        self.assertIn(("rust_syn_parse_failed", broken_line), gaps)
+        self.assertNotIn("SECRET_PARSE_TEXT", json.dumps(result))
+        only = analyze_rust_syntax("broken.rs", "fn {\n")
+        self.assertEqual(only["findings"], [])
+        self.assertEqual(_reasons(only), ["rust_syn_parse_failed"])
+        self.assertGreaterEqual(only["gaps"][0]["line"], 1)
+        balanced = analyze_rust_syntax("balanced.rs", "unsafe fn marked() {}\nfn {}\n")
+        self.assertIn(("RUST_UNSAFE_INVENTORY", 1), {
+            (item["rule"], item["line"]) for item in balanced["findings"]
+        })
+        self.assertNotIn(2, [item["line"] for item in balanced["findings"]])
+        self.assertIn(("rust_syn_parse_failed", 2), {
+            (item["reason"], item["line"]) for item in balanced["gaps"]
+        })
+        crlf_broken = analyze_rust_syntax("crlf-broken.rs", "unsafe fn marked() {}\r\nfn {\r\n")
+        self.assertIn(("RUST_UNSAFE_INVENTORY", 1), {
+            (item["rule"], item["line"]) for item in crlf_broken["findings"]
+        })
+        self.assertIn(("rust_syn_parse_failed", 2), {
+            (item["reason"], item["line"]) for item in crlf_broken["gaps"]
+        })
+        self.assertNotIn(2, [item["line"] for item in crlf_broken["findings"]])
+        valid = analyze_rust_syntax("ok.rs", "unsafe fn marked() {}\n")
+        self.assertNotIn("rust_syn_parse_failed", _reasons(valid))
+        self.assertIn(("RUST_UNSAFE_INVENTORY", 1), {
+            (item["rule"], item["line"]) for item in valid["findings"]
+        })
+        shebang = "#!/usr/bin/env rustx\nunsafe fn marked() {}\nfn {\n"
+        shebang_result = analyze_rust_syntax("shebang.rs", shebang)
+        self.assertIn(("RUST_UNSAFE_INVENTORY", 2), {
+            (item["rule"], item["line"]) for item in shebang_result["findings"]
+        })
+        self.assertIn(("rust_syn_parse_failed", 3), {
+            (item["reason"], item["line"]) for item in shebang_result["gaps"]
+        })
+        self.assertNotIn(3, [item["line"] for item in shebang_result["findings"]])
+        bom = "\ufeffunsafe fn marked() {}\nfn {\n"
+        bom_result = analyze_rust_syntax("bom.rs", bom)
+        self.assertIn(("RUST_UNSAFE_INVENTORY", 1), {
+            (item["rule"], item["line"]) for item in bom_result["findings"]
+        })
+        self.assertIn(("rust_syn_parse_failed", 2), {
+            (item["reason"], item["line"]) for item in bom_result["gaps"]
+        })
+        inner = analyze_rust_syntax("inner.rs", "#![cfg(test)]\nunsafe fn marked() {}\n")
+        self.assertNotIn("rust_syn_parse_failed", _reasons(inner))
+        self.assertIn(("rust_cfg_unresolved", 1), {
+            (item["reason"], item["line"]) for item in inner["gaps"]
+        })
+        self.assertIn(("RUST_UNSAFE_INVENTORY", 2), {
+            (item["rule"], item["line"]) for item in inner["findings"]
+        })
+
     def test_external_module_and_include_are_not_read(self) -> None:
         directory = Path(tempfile.mkdtemp())
         try:
@@ -883,6 +962,52 @@ class AdversarialSynScanTests(unittest.TestCase):
             "invoked_stdin_only_no_macro_expansion",
         )
         self.assertIs(opted["analysis_limits"]["coverage_claim"], False)
+        self.assertNotIn(opted["status"], {"PASS", "REVIEWED", "APPROVED", "NO_HEURISTIC_FINDINGS"})
+
+    def test_scan_keeps_prefix_findings_when_a_later_line_fails_to_parse(self) -> None:
+        source = "\n".join((
+            "unsafe fn marked() {}",
+            "#[link(name = \"c\")]",
+            "extern \"C\" {}",
+            "#[unsafe]",
+            "fn flagged() {}",
+            "fn {",
+            "",
+        ))
+        directory = Path(tempfile.mkdtemp())
+        try:
+            (directory / "lib.rs").write_text(source, encoding="utf-8")
+            default = scan(directory)
+            opted = scan(directory, rust_syntax="syn")
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+        self.assertEqual(
+            default["analysis_limits"]["rust_syn_backend"],
+            "not_invoked_default_scan_does_not_spawn",
+        )
+        self.assertNotIn("rust_syn_parse_failed", _scan_reasons(default))
+        default_findings = {(item["path"], item["rule"], item["line"]) for item in default["findings"]}
+        self.assertNotIn(("lib.rs", "RUST_FFI_BOUNDARY", _line_of(source, "#[link")), default_findings)
+        self.assertNotIn(("lib.rs", "RUST_UNSAFE_INVENTORY", _line_of(source, "#[unsafe]")), default_findings)
+        self.assertEqual(opted["status"], "INCOMPLETE")
+        self.assertIs(opted["analysis_limits"]["coverage_claim"], False)
+        self.assertEqual(opted["analysis_limits"]["rust_macros"], "not_expanded")
+        self.assertEqual(opted["analysis_limits"]["rust_cfg"], "unresolved_not_evaluated")
+        self.assertEqual(opted["analysis_limits"]["rust_names"], "not_resolved")
+        self.assertIs(opted["cve_coverage"]["completeness"], False)
+        self.assertIsNone(opted["cve_coverage"]["queried_at"])
+        self.assertEqual(
+            opted["analysis_limits"]["rust_syn_backend"],
+            "invoked_stdin_only_no_macro_expansion",
+        )
+        findings = {(item["path"], item["rule"], item["line"]) for item in opted["findings"]}
+        self.assertIn(("lib.rs", "RUST_UNSAFE_INVENTORY", 1), findings)
+        self.assertIn(("lib.rs", "RUST_FFI_BOUNDARY", _line_of(source, "#[link")), findings)
+        self.assertIn(("lib.rs", "RUST_UNSAFE_INVENTORY", _line_of(source, "#[unsafe]")), findings)
+        self.assertNotIn(_line_of(source, "fn {"), [item["line"] for item in opted["findings"]])
+        self.assertIn(("rust_syn_parse_failed", _line_of(source, "fn {")), {
+            (item["reason"], item.get("line")) for item in opted["coverage_gaps"]
+        })
         self.assertNotIn(opted["status"], {"PASS", "REVIEWED", "APPROVED", "NO_HEURISTIC_FINDINGS"})
 
     def test_rust_syntax_flag_rejects_values_outside_the_two_modes(self) -> None:

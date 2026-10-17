@@ -4,6 +4,10 @@
 //! resolve names, read module files, spawn processes, or open the network.
 //! Token streams inside macros are not parsed, so nested macro bodies are a
 //! coverage gap rather than an inventory of their text.
+//!
+//! If parsing fails on a later line, lines before that error are parsed
+//! again. The result also records `rust_syn_parse_failed` and does not print
+//! the parser's error text. Parsing does not resume on or after the error.
 
 use std::collections::BTreeSet;
 use std::io::{self, Read};
@@ -261,6 +265,57 @@ fn emit_failure(reason: &str, line: Option<usize>) -> ExitCode {
     emit(&BTreeSet::new(), &[gap])
 }
 
+fn emit_recovered_prefix(source: &str, error_line: usize) -> ExitCode {
+    let mut inventory = Inventory {
+        findings: BTreeSet::new(),
+        gaps: BTreeSet::new(),
+    };
+    if let Some(file) = prefix_before_parse_error(source, error_line) {
+        inventory.visit_file(&file);
+    }
+    inventory.gap_at("rust_syn_parse_failed", error_line);
+    emit_inventory(&inventory)
+}
+
+/// Keep source lines before the parse error and parse that prefix with the
+/// same `syn::parse_file` entry point. An unclosed delimiter fails tokenization
+/// of the whole buffer, so the failed line is not resumed or rewritten.
+fn prefix_before_parse_error(source: &str, error_line: usize) -> Option<syn::File> {
+    let mut line = error_line;
+    let mut attempts = 0u8;
+    while line > 1 && attempts < 64 {
+        attempts += 1;
+        let prefix = source_before_line(source, line);
+        match syn::parse_file(prefix) {
+            Ok(file) => return Some(file),
+            Err(error) => {
+                let next = error.span().start().line;
+                if next == 0 || next >= line {
+                    return None;
+                }
+                line = next;
+            }
+        }
+    }
+    None
+}
+
+fn source_before_line(source: &str, line: usize) -> &str {
+    if line <= 1 {
+        return "";
+    }
+    let mut seen = 1usize;
+    for (idx, ch) in source.char_indices() {
+        if ch == '\n' {
+            seen += 1;
+            if seen == line {
+                return &source[..idx + ch.len_utf8()];
+            }
+        }
+    }
+    source
+}
+
 fn main() -> ExitCode {
     let mut input = Vec::new();
     let mut stdin = io::stdin();
@@ -281,10 +336,7 @@ fn main() -> ExitCode {
     };
     let file = match syn::parse_file(&source) {
         Ok(file) => file,
-        Err(error) => {
-            let line = error.span().start().line;
-            return emit_failure("rust_syn_parse_failed", Some(line));
-        }
+        Err(error) => return emit_recovered_prefix(&source, error.span().start().line),
     };
     let mut inventory = Inventory {
         findings: BTreeSet::new(),
