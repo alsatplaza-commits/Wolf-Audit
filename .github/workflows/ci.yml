@@ -12,9 +12,32 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Rust syntax backend
+        shell: bash
+        run: |
+          if ! command -v cargo >/dev/null 2>&1; then
+            if [ "$RUNNER_OS" = "Windows" ]; then
+              curl -fsS -o rustup-init.exe https://win.rustup.rs/x86_64
+              ./rustup-init.exe -y --profile minimal --default-toolchain 1.83.0
+              export PATH="$USERPROFILE/.cargo/bin:$PATH"
+            else
+              curl --proto '=https' --tlsv1.2 -fsS https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.83.0
+              . "$HOME/.cargo/env"
+            fi
+          fi
+          cargo build --locked --manifest-path tools/wolf_syn/Cargo.toml
+          if [ -f tools/wolf_syn/target/debug/wolf_syn.exe ]; then
+            bin="$PWD/tools/wolf_syn/target/debug/wolf_syn.exe"
+          else
+            bin="$PWD/tools/wolf_syn/target/debug/wolf_syn"
+          fi
+          if command -v cygpath >/dev/null 2>&1; then
+            bin="$(cygpath -m "$bin")"
+          fi
+          echo "WOLF_SYN_BIN=$bin" >> "$GITHUB_ENV"
       - name: Python 3.11+
         shell: bash
         run: python --version
@@ -36,14 +59,40 @@ jobs:
       - name: Self-audit (read-only, explicit non-certification)
         shell: bash
         run: |
+          set -euo pipefail
           code=0
           python -m wolf_auditor . --output wolf-auditor-self-report.json --sarif wolf-auditor.sarif --sbom wolf-auditor.cdx.json || code=$?
-          if [ "$code" -eq 2 ]; then
-            echo "INCOMPLETE scan; fail closed"
-            exit 2
+          python - <<'PY'
+          import json
+          import sys
+          report = json.load(open("wolf-auditor-self-report.json", encoding="utf-8"))
+          if report["status"] in {"PASS", "REVIEWED", "APPROVED"}:
+              sys.exit("self-audit must not claim approval")
+          limits = report["analysis_limits"]
+          if limits["coverage_claim"] is not False or limits["parser_stage"] != "token_heuristic":
+              sys.exit("default scan changed its coverage claim or parser stage")
+          if limits["rust_syn_backend"] != "not_invoked_default_scan_does_not_spawn":
+              sys.exit("default scan invoked the syn backend")
+          allowed = {
+              "rust_cfg_unresolved",
+              "rust_macro_not_expanded",
+              "rust_name_resolution_unresolved",
+              "rust_heuristic_unclassified_unsafe",
+              "rust_heuristic_unclassified_extern",
+          }
+          for gap in report["coverage_gaps"]:
+              path = gap["path"].replace("\\", "/")
+              if not path.startswith("tools/wolf_syn/") or gap["reason"] not in allowed:
+                  sys.exit(f"unexpected coverage gap: {gap}")
+          print(
+              f"self-audit status={report['status']} "
+              f"gaps={len(report['coverage_gaps'])} findings={len(report['findings'])}"
+          )
+          PY
+          if [ "$code" -gt 2 ]; then
+            exit "$code"
           fi
           echo "Heuristic findings are inventory, not an independent security approval"
-          exit 0
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:

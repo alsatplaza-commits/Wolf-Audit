@@ -38,7 +38,10 @@ PARSER_PLAN: tuple[dict[str, Any], ...] = (
         "compiles_source": False,
         "runs_build_scripts": False,
         "expands_macros": False,
-        "reason": "Not integrated. A later parser must not compile the crate or run build scripts.",
+        "reason": (
+            "The default scan does not call syn. analyze_rust_syntax is a separate "
+            "read-only inventory and does not compile the crate or run build scripts."
+        ),
     },
 )
 

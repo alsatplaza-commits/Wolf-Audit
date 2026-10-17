@@ -174,6 +174,7 @@ def scan(root: Path) -> dict[str, Any]:
             "rust_macros": "not_expanded",
             "rust_names": "not_resolved",
             "parser_stage": "token_heuristic",
+            "rust_syn_backend": "not_invoked_default_scan_does_not_spawn",
             "windows_native_runtime": "not_executed_read_only_no_process_access",
             "fuzz_on_target": "not_executed_untrusted_target_not_run",
             "coverage_claim": False,

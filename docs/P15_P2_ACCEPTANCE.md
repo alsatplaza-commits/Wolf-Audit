@@ -45,8 +45,10 @@ Statuses used here:
 | Path names are not resolved | Locked, gap `rust_name_resolution_unresolved` | `test_hidden_macro_cfg_and_path_are_incomplete` |
 | Comments and strings do not create those gaps | Locked | `test_comments_and_strings_do_not_create_resolution_gaps` |
 | Language registry is not Rust-only and does not compile | Locked | `test_registry_is_not_rust_only_and_does_not_compile` |
-| syn or rust-analyzer integration | HOLD | `PARSER_PLAN` records the candidate stage as not implemented. It must not run build scripts. |
-| Full Rust parser, build-cfg reachability, name resolution | HOLD | Gaps above are the absence of those analyses, not a compiler result. |
+| syn syntax inventory, explicit call only | Locked when `wolf_syn` is built. Default scan does not spawn it. | `tests/test_p23_syn_backend.py` (`test_syn_inventory_matches_syntax`, `test_default_scan_does_not_spawn_syn`) |
+| Macro expansion, cfg evaluation, name resolution, and rust-analyzer | HOLD | The syn backend records those as gaps. It does not run build scripts, procedural macros, or rust-analyzer. |
+| Raw pointers and `static mut` in the syn inventory | Locked as gaps, not findings | `test_unclassified_pointers_and_static_mut_are_gaps`. The default token heuristic still reports its own findings. |
+| Full Rust parser, build-cfg reachability, name resolution | HOLD | Gaps above are the absence of those analyses, not a compiler result. P2.3 is not complete. |
 | Windows API names in C/C++ comments and strings are ignored; real calls are classified | Locked | `test_windows_native_api_detection_ignores_comments_and_strings` |
 | Runtime process inspection | HOLD, status `NOT_EXECUTED`, native files stay `INCOMPLETE` | `test_windows_runtime_is_not_pass_on_host`. The module does not open a process on Linux or Windows. |
 | Fuzz seed, iteration, timeout, memory, crash, replay | Locked | `test_deterministic_fuzz_repeats_and_does_not_claim_coverage`, `test_non_bytes_seed_is_rejected`, `test_zero_and_negative_iterations_are_rejected`, `test_timeout_crash_and_memory_limit_are_distinct_and_replayable` |
