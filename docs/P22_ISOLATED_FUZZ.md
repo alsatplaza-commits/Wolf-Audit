@@ -13,4 +13,4 @@ If any isolation check fails, the status is `INCOMPLETE` or `BLOCK`, `executed` 
 
 A completed run is `COMPLETE`, not `PASS`. Crash, timeout, and a memory budget below the isolation floor are separate statuses. The report stores seed and payload hashes plus those classifications. Child output, the parent environment, and payload bytes are not copied into the report. `coverage_claim` is false: this is not coverage of an audited tree and not a certification.
 
-Independent human approval remains HOLD. A runner without `unshare` or without a static ELF fixture cannot produce a successful execution result.
+Independent human approval remains HOLD. A runner without `unshare`, without the `resource` module, or whose kernel denies the user namespace cannot produce a successful execution result. The probe failure is `INCOMPLETE` and the target stays unstarted. GitHub-hosted Ubuntu currently denies that namespace, so its job proves the refusal, not a jailed run.

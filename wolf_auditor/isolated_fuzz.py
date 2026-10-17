@@ -13,7 +13,6 @@ from __future__ import annotations
 import hashlib
 import os
 import random
-import resource  # Imported before a sandbox unmounts the host filesystem.
 import shutil
 import struct
 import subprocess
@@ -29,6 +28,11 @@ _MAX_INPUT_BYTES = 64
 _MEMORY_FLOOR = 32 * 1024 * 1024
 _MAX_TARGET_BYTES = 2_000_000
 _LIMITATION = "Isolated target execution is not fuzz coverage and is not a security certification."
+
+try:
+    import resource as _resource
+except ImportError:
+    _resource = None  # Windows has no resource module; the probe then stays closed.
 
 
 def run_authorized_target(
@@ -111,7 +115,7 @@ def planned_payloads(seed: bytes, iterations: int, max_input_bytes: int) -> list
 
 
 def probe_isolation() -> dict[str, Any]:
-    if os.name != "posix" or shutil.which("unshare") is None:
+    if os.name != "posix" or _resource is None or shutil.which("unshare") is None:
         return _probe(False, "posix_namespace_unavailable")
     kind, detail = _namespace(mode="probe", payload=b"", timeout_seconds=5, memory_bytes=_MEMORY_FLOOR)
     if kind == "PROBE":
@@ -308,7 +312,7 @@ def _namespace(
             str(max(1, int(timeout_seconds))), mode, payload.hex(),
         ]
         try:
-            subprocess.run(
+            completed = subprocess.run(
                 command,
                 check=False,
                 timeout=timeout_seconds + 2 if mode == "exec" else timeout_seconds,
@@ -318,11 +322,15 @@ def _namespace(
                 close_fds=True,
             )
             timed_out = False
+            return_code = completed.returncode
         except subprocess.TimeoutExpired:
             timed_out = True
+            return_code = None
         os.close(write_fd)
         write_fd = None
         message = os.read(read_fd, 512).decode("ascii", "replace")
+        if not message.strip() and return_code not in (0, None):
+            return "BLOCK", "namespace_probe_failed"
         return _classify_message(message, timed_out)
     finally:
         if write_fd is not None:
@@ -390,12 +398,14 @@ def _sandbox_main() -> None:
     child = os.fork()
     if child == 0:
         os.close(write_fd)
+        if _resource is None:
+            os._exit(127)
         memory = int(memory_text)
         cpu = int(cpu_text)
-        resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
-        resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu))
-        resource.setrlimit(resource.RLIMIT_NPROC, (8, 8))
-        resource.setrlimit(resource.RLIMIT_FSIZE, (1_048_576, 1_048_576))
+        _resource.setrlimit(_resource.RLIMIT_AS, (memory, memory))
+        _resource.setrlimit(_resource.RLIMIT_CPU, (cpu, cpu))
+        _resource.setrlimit(_resource.RLIMIT_NPROC, (8, 8))
+        _resource.setrlimit(_resource.RLIMIT_FSIZE, (1_048_576, 1_048_576))
         try:
             os.execv("/work/target", ["/work/target", payload_hex])
         except OSError:

@@ -5,7 +5,6 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -144,8 +143,6 @@ class IsolatedFuzzTests(unittest.TestCase):
 
     def test_live_static_target_is_jailed_redacted_and_replayable(self) -> None:
         probe = probe_isolation()
-        if _linux_toolchain():
-            self.assertTrue(probe["available"], probe)
         if not probe["available"]:
             result = run_authorized_target(
                 enabled=True, target=__file__, allowlist=[Path(__file__).resolve().parent], network=False, **_KW,
@@ -197,10 +194,14 @@ class IsolatedFuzzTests(unittest.TestCase):
 
     def test_crash_and_timeout_are_distinct(self) -> None:
         probe = probe_isolation()
-        if _linux_toolchain():
-            self.assertTrue(probe["available"], probe)
         if not probe["available"]:
-            self.assertIn(probe["reason"], {"posix_namespace_unavailable", "namespace_probe_failed", "unshare_missing"})
+            self.assertIsNone(probe["mechanism"])
+            refused = run_authorized_target(
+                enabled=True, target=__file__, allowlist=[Path(__file__).resolve().parent], network=False, **_KW,
+            )
+            self.assertFalse(refused["executed"])
+            self.assertEqual(refused["status"], "INCOMPLETE")
+            self.assertFalse(refused["coverage_claim"])
             return
         root = Path(tempfile.mkdtemp())
         try:
@@ -227,10 +228,6 @@ class IsolatedFuzzTests(unittest.TestCase):
             self.assertNotEqual(crashed["status"], timed["status"])
         finally:
             shutil.rmtree(root, ignore_errors=True)
-
-
-def _linux_toolchain() -> bool:
-    return sys.platform.startswith("linux") and shutil.which("unshare") is not None and shutil.which("gcc") is not None
 
 
 def _static_binary(code: str, directory: Path | None = None, name: str = "tool") -> Path | None:
