@@ -26,6 +26,32 @@ class AttributeLimitTests(unittest.TestCase):
         unknown, unknown_gaps = analyze_rust("u.rs", "#[project_macro]\nfn safe() {}\n")
         self.assertEqual(unknown, [])
         self.assertIn("rust_macro_not_expanded", [item["reason"] for item in unknown_gaps])
+        nested, nested_gaps = analyze_rust(
+            "n.rs", "#[cfg_attr(not(test), derive(HiddenUnsafe))]\nfn safe() {}\n",
+        )
+        self.assertEqual(nested, [])
+        nested_reasons = [item["reason"] for item in nested_gaps]
+        self.assertIn("rust_cfg_unresolved", nested_reasons)
+        self.assertIn("rust_macro_not_expanded", nested_reasons)
+        procedural, procedural_gaps = analyze_rust(
+            "p.rs", "#[cfg_attr(unix, proc_macro_derive(Widget))]\nfn safe() {}\n",
+        )
+        self.assertEqual(procedural, [])
+        self.assertIn("rust_macro_not_expanded", [item["reason"] for item in procedural_gaps])
+        inner, inner_gaps = analyze_rust(
+            "i.rs", '#[cfg_attr(unix, cfg_attr(target_os = "linux", project_macro))]\nfn safe() {}\n',
+        )
+        inner_reasons = [item["reason"] for item in inner_gaps]
+        self.assertIn("rust_cfg_unresolved", inner_reasons)
+        self.assertIn("rust_macro_not_expanded", inner_reasons)
+        preserved, preserved_gaps = analyze_rust(
+            "k.rs", "#[cfg_attr(not(test), unsafe(no_mangle))]\nfn exported() {}\n",
+        )
+        self.assertIn("RUST_UNSAFE_INVENTORY", {item["rule"] for item in preserved})
+        self.assertIn("RUST_FFI_SYMBOL", {item["rule"] for item in preserved})
+        self.assertIn("rust_cfg_unresolved", [item["reason"] for item in preserved_gaps])
+        self.assertNotIn("rust_macro_not_expanded", [item["reason"] for item in preserved_gaps])
+        self.assertNotIn("no_mangle", json.dumps(preserved))
         commented, commented_gaps = analyze_rust(
             "s.rs", '// #[derive(HiddenUnsafe)]\nlet s = "#[derive(HiddenUnsafe)]";\nfn safe() {}\n',
         )

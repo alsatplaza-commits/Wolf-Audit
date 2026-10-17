@@ -144,6 +144,42 @@ class _Token:
         self.attribute_head = False
 
 
+def _mark_attribute_heads(tokens: list[_Token]) -> None:
+    """Mark the attribute name, and names applied by cfg_attr, without evaluating cfg."""
+    index = 0
+    while index < len(tokens) and tokens[index].kind != "ident":
+        index += 1
+    if index >= len(tokens):
+        return
+    tokens[index].attribute_head = True
+    if tokens[index].text == "cfg_attr":
+        _mark_cfg_attr_targets(tokens, index + 1, 8)
+
+
+def _mark_cfg_attr_targets(tokens: list[_Token], index: int, limit: int) -> None:
+    if limit == 0 or index >= len(tokens) or tokens[index].text != "(":
+        return
+    depth = 0
+    after_comma = False
+    cursor = index
+    while cursor < len(tokens):
+        text = tokens[cursor].text
+        if text == "(":
+            depth += 1
+        elif text == ")":
+            depth -= 1
+            if depth == 0:
+                return
+        elif text == "," and depth == 1:
+            after_comma = True
+        elif after_comma and depth == 1 and tokens[cursor].kind == "ident":
+            tokens[cursor].attribute_head = True
+            after_comma = False
+            if text == "cfg_attr":
+                _mark_cfg_attr_targets(tokens, cursor + 1, limit - 1)
+        cursor += 1
+
+
 def _tokenize(path: str, content: str) -> tuple[list[_Token], list[dict[str, str]]]:
     tokens: list[_Token] = []
     gaps: list[dict[str, str]] = []
@@ -218,10 +254,7 @@ def _tokenize(path: str, content: str) -> tuple[list[_Token], list[dict[str, str
             for token in inner:
                 token.in_attribute = True
                 token.line += line - 1
-            for token in inner:
-                if token.kind == "ident":
-                    token.attribute_head = True
-                    break
+            _mark_attribute_heads(inner)
             tokens.extend(inner)
             gaps.extend(inner_gaps)
             line += chars.count("\n", index, end)

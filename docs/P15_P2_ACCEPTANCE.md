@@ -40,7 +40,7 @@ Statuses used here:
 | `include!` hides unseen source | Locked, gap `rust_macro_not_expanded` | same test |
 | Macro body tokens are inventoried; a macro invocation is an explicit gap | Locked, gap `rust_macro_not_expanded` | `test_rust_macro_boundaries_are_not_a_parser_pass`, `test_hidden_macro_cfg_and_path_are_incomplete` |
 | `cfg` is not evaluated | Locked, gap `rust_cfg_unresolved` | same tests |
-| `cfg_attr` and `#[derive]` are not treated as clean source | Locked, gaps `rust_cfg_unresolved` and `rust_macro_not_expanded` | `test_attribute_macros_are_not_a_clean_result` |
+| `cfg_attr` and `#[derive]` are not treated as clean source | Locked, gaps `rust_cfg_unresolved` and `rust_macro_not_expanded` | `test_attribute_macros_are_not_a_clean_result`. A `derive` or procedural-macro attribute nested in `cfg_attr` is also a macro gap. `inline` nested in `cfg_attr` stays a cfg gap only. |
 | Classified attributes such as `unsafe(no_mangle)` stay review findings | Locked | `test_known_attributes_are_not_relabelled_as_macros` |
 | Path names are not resolved | Locked, gap `rust_name_resolution_unresolved` | `test_hidden_macro_cfg_and_path_are_incomplete` |
 | Comments and strings do not create those gaps | Locked | `test_comments_and_strings_do_not_create_resolution_gaps` |
