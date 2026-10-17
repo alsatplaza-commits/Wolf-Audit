@@ -13,7 +13,7 @@
 
 - P0 (implemented prototype): Offline read-only scanning, provenance hash, incomplete status, heuristic rules, CLI and unit tests.
 - P1 (partial, prototype): Python AST heuristics, offline Cargo/npm/pip component inventory, SARIF 2.1.0 and CycloneDX 1.6 output. External adapters, independent verification, CVE feeds, production release policy and full language coverage are NOT implemented.
-- P2 (planned): FFI and memory analysis, fuzzing in isolated workers, Windows native checks and negative test generation.
+- P2 (partial prototype): Rust token heuristic for `unsafe`, FFI attributes, raw pointers and `static mut`; read-only Windows API name inventory; a caller-supplied fuzz harness with seed, iteration, timeout and allocation limits. This is not a Rust parser, not live process inspection, and not fuzz coverage of the audited tree. Unclosed Rust literals and native files that were not runtime-checked stay INCOMPLETE. DAST, native Windows fuzzing, and memory-exploit proof remain unsupported.
 - P3 (planned): Sandboxed runtime verification, AI-agent security, enterprise roles, multi-project policies and signed human review.
 
 ## Product rules
